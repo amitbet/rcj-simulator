@@ -136,15 +136,25 @@ export class Renderer2D {
     ctx.fillStyle = COLORS.FIELD_GREEN;
     ctx.fillRect(-fieldHalfW, -fieldHalfH, FIELD.WIDTH, FIELD.HEIGHT);
 
-    // Field pattern (checkerboard-ish)
+    // Field pattern (proper checkerboard) - clip to field boundaries
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(-fieldHalfW, -fieldHalfH, FIELD.WIDTH, FIELD.HEIGHT);
+    ctx.clip();
+    
     ctx.fillStyle = COLORS.FIELD_DARK_GREEN;
     const gridSize = 20;
-    for (let x = -fieldHalfW; x < fieldHalfW; x += gridSize * 2) {
-      for (let y = -fieldHalfH; y < fieldHalfH; y += gridSize * 2) {
-        ctx.fillRect(x, y, gridSize, gridSize);
-        ctx.fillRect(x + gridSize, y + gridSize, gridSize, gridSize);
+    for (let gridX = 0; gridX < FIELD.WIDTH / gridSize; gridX++) {
+      for (let gridY = 0; gridY < FIELD.HEIGHT / gridSize; gridY++) {
+        const x = -fieldHalfW + gridX * gridSize;
+        const y = -fieldHalfH + gridY * gridSize;
+        // Alternate colors based on grid position
+        if ((gridX + gridY) % 2 === 0) {
+          ctx.fillRect(x, y, gridSize, gridSize);
+        }
       }
     }
+    ctx.restore();
 
     // White lines on field boundary
     ctx.strokeStyle = COLORS.LINE_WHITE;
@@ -153,33 +163,25 @@ export class Renderer2D {
     // Field boundary lines
     ctx.strokeRect(-fieldHalfW, -fieldHalfH, FIELD.WIDTH, FIELD.HEIGHT);
 
-    // Center line
+    // Center line (BLACK - not white, so line sensors don't detect it)
+    ctx.strokeStyle = '#000000';
     ctx.beginPath();
     ctx.moveTo(-fieldHalfW, 0);
     ctx.lineTo(fieldHalfW, 0);
     ctx.stroke();
 
-    // Center circle
+    // Center circle (BLACK)
     ctx.beginPath();
     ctx.arc(0, 0, FIELD.CENTER_CIRCLE_RADIUS, 0, Math.PI * 2);
     ctx.stroke();
 
-    // Center dot
-    ctx.fillStyle = COLORS.LINE_WHITE;
+    // Center dot (BLACK)
+    ctx.fillStyle = '#000000';
     ctx.beginPath();
     ctx.arc(0, 0, 2, 0, Math.PI * 2);
     ctx.fill();
 
-    // Goal areas
-    const goalAreaWidth = GOAL.WIDTH + 20;
-    const goalAreaDepth = 20;
-    
-    // Blue goal area (top)
-    ctx.strokeStyle = COLORS.LINE_WHITE;
-    ctx.strokeRect(-goalAreaWidth / 2, -fieldHalfH, goalAreaWidth, goalAreaDepth);
-    
-    // Yellow goal area (bottom)
-    ctx.strokeRect(-goalAreaWidth / 2, fieldHalfH - goalAreaDepth, goalAreaWidth, goalAreaDepth);
+    // Goal areas are drawn in drawGoals() method
 
     // Walls at OUTER boundary
     ctx.fillStyle = COLORS.WALL_BLACK;

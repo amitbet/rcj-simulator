@@ -145,28 +145,29 @@ export class Renderer3D {
     const boundary = new THREE.Line(boundaryGeom, lineMat);
     this.field!.add(boundary);
 
-    // Center line
+    // Center line (BLACK - not white, so line sensors don't detect it)
     const centerLinePoints = [
       new THREE.Vector3(-halfW, 0.1, 0),
       new THREE.Vector3(halfW, 0.1, 0),
     ];
     const centerLineGeom = new THREE.BufferGeometry().setFromPoints(centerLinePoints);
-    const centerLine = new THREE.Line(centerLineGeom, lineMat);
+    const centerLineMat = new THREE.LineBasicMaterial({ color: 0x000000 });
+    const centerLine = new THREE.Line(centerLineGeom, centerLineMat);
     this.field!.add(centerLine);
 
-    // Center circle
+    // Center circle (BLACK)
     const circleGeom = new THREE.RingGeometry(
       FIELD.CENTER_CIRCLE_RADIUS - 0.5,
       FIELD.CENTER_CIRCLE_RADIUS + 0.5,
       64
     );
-    const circleMat = new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide });
+    const circleMat = new THREE.MeshBasicMaterial({ color: 0x000000, side: THREE.DoubleSide });
     const circle = new THREE.Mesh(circleGeom, circleMat);
     circle.rotation.x = -Math.PI / 2;
     circle.position.y = 0.1;
     this.field!.add(circle);
 
-    // Center dot
+    // Center dot (BLACK)
     const dotGeom = new THREE.CircleGeometry(2, 16);
     const dot = new THREE.Mesh(dotGeom, circleMat);
     dot.rotation.x = -Math.PI / 2;
