@@ -421,6 +421,9 @@ export class SimulationEngine {
       cancelAnimationFrame(this.animationFrameId);
       this.animationFrameId = null;
     }
+
+    // Push state immediately so UI updates pause button right away
+    this.onStateUpdate?.(this.getSimulationState());
   }
 
   // Toggle pause
@@ -429,6 +432,9 @@ export class SimulationEngine {
       this.pause();
     } else {
       this.start();
+
+      // Push state immediately so UI updates play button without waiting a frame
+      this.onStateUpdate?.(this.getSimulationState());
     }
   }
 
