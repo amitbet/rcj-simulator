@@ -4,23 +4,24 @@
 // ============================================================
 
 // Field dimensions (in cm)
-// Soccer Open field: typically 182cm x 243cm (6ft x 8ft)
+// Total footprint including outer area: ~182 cm × 243 cm
+// Playable field marked by white line: 158 cm × 219 cm
 // Goals are on the shorter sides (WIDTH), field is longer (HEIGHT = goal-to-goal)
 export const FIELD = {
-  // Playing field dimensions (the green area with lines)
-  WIDTH: 182,              // 182 cm (6 ft) - side to side
-  HEIGHT: 243,             // 243 cm (8 ft) - goal to goal
+  // Playing field dimensions (the green area with white lines)
+  WIDTH: 158,              // 158 cm - side to side (playable field)
+  HEIGHT: 219,             // 219 cm - goal to goal (playable field)
   
   // Outer area / border (area beyond field lines where robots can roam)
   // Walls are at the outer edge of this area
-  OUTER_WIDTH: 30,         // 30 cm outer area on each side
+  OUTER_WIDTH: 12,         // 12 cm outer area on each side (182-158)/2 = 12
   
   // Total dimensions including outer area (where walls are)
-  TOTAL_WIDTH: 242,        // 182 + 2*30
-  TOTAL_HEIGHT: 303,       // 243 + 2*30
+  TOTAL_WIDTH: 182,        // 158 + 2*12 = 182 cm
+  TOTAL_HEIGHT: 243,       // 219 + 2*12 = 243 cm
   
   // Wall height
-  WALL_HEIGHT: 14,         // 14 cm minimum recommended
+  WALL_HEIGHT: 22,         // 22 cm matte-black walls around entire field perimeter
   
   // Corner cuts (to help ball retrieval)
   CORNER_CUT: 14,          // 14 cm diagonal corner cuts
@@ -29,19 +30,19 @@ export const FIELD = {
   CENTER_CIRCLE_RADIUS: 30, // 30 cm radius (60 cm diameter)
   
   // Penalty area (optional, not always used in Open)
-  PENALTY_AREA_WIDTH: 90,  // 90 cm
-  PENALTY_AREA_DEPTH: 30,  // 30 cm from goal line
+  PENALTY_AREA_WIDTH: 80,  // 80 cm
+  PENALTY_AREA_DEPTH: 25,  // 25 cm from goal line
   
   // Line width
   LINE_WIDTH: 2,           // 2 cm white lines
 };
 
-// Goal dimensions (in cm) - Based on user specifications for Open league
+// Goal dimensions (in cm) - Based on 2025/2026 RoboCup Junior Soccer specifications
 // Goals are on the short sides of the field (FIELD.WIDTH side)
 export const GOAL = {
-  WIDTH: 70,               // 70 cm (700 mm) internal width
-  HEIGHT: 20,              // 20 cm (200 mm) crossbar height
-  DEPTH: 18,               // 18 cm (180 mm) internal depth
+  WIDTH: 60,               // 60 cm inner width
+  HEIGHT: 10,              // 10 cm height
+  DEPTH: 7.4,              // 7.4 cm depth
   WALL_THICKNESS: 2,       // 2 cm goal wall thickness
 };
 
@@ -52,11 +53,11 @@ export const BALL = {
   MASS: 0.0459,            // 45.9 grams
 };
 
-// Robot dimensions (in cm) - RCJ Soccer Open specifications
+// Robot dimensions (in cm) - 2026 RoboCup Junior Soccer specifications
 export const ROBOT = {
-  DIAMETER: 22,            // 22 cm (220 mm) max diameter
-  RADIUS: 11,              // 11 cm radius
-  HEIGHT: 22,              // 22 cm (220 mm) max height
+  DIAMETER: 18,            // 18 cm max diameter
+  RADIUS: 9,               // 9 cm radius
+  HEIGHT: 18,              // 18 cm max height
   NOTCH_ANGLE: 25,         // degrees - small kicker notch opening
   NOTCH_DEPTH: 4,          // cm depth of kicker notch (4cm half-circle divet)
   NOTCH_RADIUS: 2,         // cm radius of the half-circle kicker divet
@@ -177,10 +178,13 @@ export const CAMERA = {
 // ============================================================
 // Proportional Reference (for verification):
 // ============================================================
-// Field: 182cm x 243cm
-// Robot diameter: 22cm = 12% of field width, 9% of field length
-// Ball diameter: 4.27cm = 2.3% of field width
-// Goal width: 70cm = 38% of field width
-// This means ~8 robots can fit side-by-side across field width
-// And ~11 robots can fit goal-to-goal
+// Field playable area: 158cm x 219cm
+// Total footprint: 182cm x 243cm
+// Robot diameter: 18cm = 11.4% of field width, 8.2% of field length
+// Ball diameter: 4.27cm = 2.7% of field width
+// Goal width: 60cm = 38% of field width
+// Center circle: 60cm diameter
+// Wall height: 22cm
+// This means ~8.8 robots can fit side-by-side across field width
+// And ~12.2 robots can fit goal-to-goal
 // ============================================================

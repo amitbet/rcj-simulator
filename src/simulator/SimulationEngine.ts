@@ -300,23 +300,25 @@ export class SimulationEngine {
     this.lastUpdateTime = currentTime;
 
     const scaledDelta = deltaTime * this.speedMultiplier;
+    // Countdowns use real time (unscaled) so they're not affected by speed multiplier
+    const unscaledDelta = deltaTime;
 
     // Update based on game phase
     switch (this.gameState.phase) {
       case GamePhase.Kickoff:
-        this.updateKickoff(scaledDelta);
+        this.updateKickoff(unscaledDelta); // Countdown uses real time
         break;
       case GamePhase.Playing:
-        this.updatePlaying(scaledDelta);
+        this.updatePlaying(scaledDelta, unscaledDelta); // Physics scaled, countdowns unscaled
         break;
       case GamePhase.OutOfBounds:
-        this.updateOutOfBounds(scaledDelta);
+        this.updateOutOfBounds(unscaledDelta); // Countdown uses real time
         break;
       case GamePhase.Goal:
-        this.updateGoal(scaledDelta);
+        this.updateGoal(unscaledDelta); // Countdown uses real time
         break;
       case GamePhase.HalfTime:
-        this.updateHalfTime(scaledDelta);
+        this.updateHalfTime(unscaledDelta); // Countdown uses real time
         break;
       default:
         break;
@@ -346,8 +348,10 @@ export class SimulationEngine {
   }
 
   // Update during active play
-  private updatePlaying(deltaMs: number): void {
-    // Update game time
+  // deltaMs: scaled delta for physics (affected by speed multiplier)
+  // unscaledDeltaMs: real time delta for countdowns and timers (not affected by speed multiplier)
+  private updatePlaying(deltaMs: number, unscaledDeltaMs: number): void {
+    // Update game time (use scaled delta so game time progresses faster at higher speeds)
     this.gameState.time_elapsed_ms += deltaMs;
 
     // Check for half time / end
@@ -365,7 +369,8 @@ export class SimulationEngine {
     }
 
     // Update penalties (check if any penalties have expired)
-    this.updatePenalties(deltaMs);
+    // Penalties use real time, not scaled time
+    this.updatePenalties(unscaledDeltaMs);
 
     // Execute strategies and get actions
     const physicsState = this.physics.getState();
@@ -382,11 +387,12 @@ export class SimulationEngine {
         robot.team === 'blue'
       );
 
-      // Check for line crossings (using robot center position)
-      const robotState = physicsState.robots.get(id);
-      if (robotState) {
-        this.checkLineCrossings(id, robotState.x, robotState.y);
-      }
+      // Line crossing penalties disabled - robots can move freely
+      // The checkLineCrossings call is disabled to allow free movement
+      // const robotState = physicsState.robots.get(id);
+      // if (robotState) {
+      //   this.checkLineCrossings(id, robotState.x, robotState.y);
+      // }
 
       // Execute strategy
       const action = this.strategyExecutor.executeStrategy(id, worldState);
@@ -395,14 +401,16 @@ export class SimulationEngine {
       this.physics.applyAction(id, action);
     }
 
-    // Step physics
+    // Step physics (use scaled delta for faster physics at higher speeds)
     this.physics.step(deltaMs);
 
     // Update referee (check for lack of progress, etc.)
-    this.referee.update(deltaMs, physicsState.ball);
+    // Use unscaled time so lack of progress detection isn't affected by speed multiplier
+    this.referee.update(unscaledDeltaMs, physicsState.ball);
 
     // Check for ball unreachable/stuck situation
-    this.checkBallUnreachable(deltaMs, physicsState.ball);
+    // Use unscaled time so ball stuck detection isn't affected by speed multiplier
+    this.checkBallUnreachable(unscaledDeltaMs, physicsState.ball);
   }
 
   // Update during out of bounds
@@ -528,56 +536,11 @@ export class SimulationEngine {
   }
 
   // Check for line crossings and apply penalties (only when robot CENTER crosses a line)
+  // DISABLED: Robots can now move freely without penalties
   private checkLineCrossings(robotId: string, robotX: number, robotY: number): void {
-    const now = this.gameState.time_elapsed_ms;
-    const lastCrossingTime = this.lastLineCrossingTime.get(robotId) || 0;
-    const timeSinceLastCrossing = now - lastCrossingTime;
-    
-    const halfW = FIELD.WIDTH / 2;
-    const halfH = FIELD.HEIGHT / 2;
-    const lineTolerance = FIELD.LINE_WIDTH / 2 + 1; // Detect within line width + small margin
-    
-    // Check if robot CENTER is crossing any field boundary line (white lines)
-    let lineDetected = false;
-    
-    // Top boundary (blue goal side) - check if robot center crosses the line
-    if (Math.abs(robotY - (-halfH)) < lineTolerance && Math.abs(robotX) > GOAL.WIDTH / 2) {
-      lineDetected = true;
-    }
-    // Bottom boundary (yellow goal side)
-    else if (Math.abs(robotY - halfH) < lineTolerance && Math.abs(robotX) > GOAL.WIDTH / 2) {
-      lineDetected = true;
-    }
-    // Left boundary
-    else if (Math.abs(robotX - (-halfW)) < lineTolerance) {
-      lineDetected = true;
-    }
-    // Right boundary
-    else if (Math.abs(robotX - halfW) < lineTolerance) {
-      lineDetected = true;
-    }
-    
-    if (lineDetected) {
-      // Only count as crossing if enough time has passed since last crossing (debounce)
-      // This prevents counting the same crossing multiple times
-      if (timeSinceLastCrossing > 500) { // 500ms debounce
-        const currentCount = this.consecutiveLineCrossings.get(robotId) || 0;
-        const newCount = currentCount + 1;
-        this.consecutiveLineCrossings.set(robotId, newCount);
-        this.lastLineCrossingTime.set(robotId, now);
-        
-        // If threshold reached, apply penalty
-        if (newCount >= this.LINE_CROSSING_THRESHOLD) {
-          this.applyPenalty(robotId);
-        }
-      }
-    } else {
-      // No line detected - reset counter after a delay
-      // This allows for brief gaps between crossings to still count as consecutive
-      if (timeSinceLastCrossing > 2000) { // 2 seconds without crossing resets counter
-        this.consecutiveLineCrossings.set(robotId, 0);
-      }
-    }
+    // Line crossing penalties disabled - robots can move freely across lines
+    // This method is kept for potential future use but does nothing
+    return;
   }
 
   // Apply penalty to a robot - removes it from play
@@ -610,38 +573,35 @@ export class SimulationEngine {
   }
 
   // Update penalties (check if any have expired and restore robots)
+  // DISABLED: Line crossing penalties are disabled - robots can move freely
   private updatePenalties(deltaMs: number): void {
-    const now = this.gameState.time_elapsed_ms;
+    // Line crossing penalties disabled - restore any penalized robots immediately
+    const robots = this.physics.getRobots();
     
-    for (const [robotId, endTime] of this.penaltyEndTimes.entries()) {
-      if (now >= endTime) {
-        // Penalty expired - restore robot at starting position
-        const savedState = this.penaltyRobotStates.get(robotId);
-        if (savedState) {
-          // Get starting position for this robot
-          const startingPos = this.getStartingPosition(savedState.team, savedState.role);
-          
-          // Recreate robot at starting position
-          this.physics.createRobot(
-            robotId,
-            savedState.team,
-            savedState.role,
-            startingPos.x,
-            startingPos.y,
-            startingPos.angle
-          );
-          
-          // Strategy is still loaded in StrategyExecutor (stored by robotId)
-          // No need to reload it
-          
-          this.penaltyRobotStates.delete(robotId);
-          console.log(`[Penalty] Robot ${robotId} restored to play at starting position (${startingPos.x.toFixed(1)}, ${startingPos.y.toFixed(1)})`);
-        }
-        
-        this.penaltyEndTimes.delete(robotId);
-        this.onGameEvent?.('robot_penalty_expired', { robotId });
+    // Restore all penalized robots immediately
+    for (const [robotId, savedState] of this.penaltyRobotStates.entries()) {
+      // Check if robot exists in physics
+      if (!robots.has(robotId)) {
+        // Restore at starting position
+        const startingPos = this.getStartingPosition(savedState.team, savedState.role);
+        this.physics.createRobot(
+          robotId,
+          savedState.team,
+          savedState.role,
+          startingPos.x,
+          startingPos.y,
+          startingPos.angle
+        );
+        console.log(`[Penalty] Robot ${robotId} restored to play (penalties disabled)`);
       }
+      
+      this.penaltyRobotStates.delete(robotId);
+      this.penaltyEndTimes.delete(robotId);
+      this.onGameEvent?.('robot_penalty_expired', { robotId });
     }
+    
+    // Clear all penalty tracking
+    this.consecutiveLineCrossings.clear();
   }
 
   // Check if a robot is currently penalized

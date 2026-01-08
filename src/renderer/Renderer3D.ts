@@ -399,6 +399,12 @@ export class Renderer3D {
     marker.position.y = bodyHeight + 0.5;
     robot.add(marker);
 
+    // Front arrow indicator - shows which direction the robot is facing
+    // Positioned above the robot, at the edge pointing toward kicker
+    const arrowGroup = this.createFrontArrow(radius);
+    arrowGroup.position.y = bodyHeight + 1; // Above the robot
+    robot.add(arrowGroup);
+
     // Omni wheels - thin, inside body, arranged at 45° angles pointing toward center
     const wheelRadius = 2.5;
     const wheelThickness = 0.8; // Thin omni wheels
@@ -425,6 +431,38 @@ export class Renderer3D {
 
     this.robots.set(id, robot);
     this.scene.add(robot);
+  }
+
+  private createFrontArrow(robotRadius: number): THREE.Group {
+    const group = new THREE.Group();
+    const arrowMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+    
+    // Arrow dimensions
+    const shaftLength = robotRadius * 0.4; // Shaft length
+    const headSize = robotRadius * 0.15; // Arrow head size
+    const headLength = headSize * 1.2; // Arrow head length
+    
+    // Position the arrow group so it starts at the robot's edge
+    // The arrow extends outward from the edge in +X direction (kicker direction)
+    group.position.x = robotRadius; // Start at the edge
+    
+    // Arrow shaft - extends backward from the edge (toward center) in X direction
+    // Made thicker: 0.2 instead of 0.15
+    const shaftGeom = new THREE.BoxGeometry(shaftLength, 0.2, 0.2);
+    const shaft = new THREE.Mesh(shaftGeom, arrowMat);
+    shaft.position.x = -shaftLength / 2; // Extend backward (toward robot center) in -X
+    group.add(shaft);
+    
+    // Arrow head (pointing outward from edge in +X direction)
+    // More polygons (16 instead of 8) for rounder appearance
+    // Pulled 1 cm forward (outward)
+    const headGeom = new THREE.ConeGeometry(headSize, headLength, 16);
+    const head = new THREE.Mesh(headGeom, arrowMat);
+    head.position.x = 1; // Pulled 1 cm forward from the edge
+    head.rotation.z = -Math.PI / 2; // Rotate to point in +X direction (kicker direction)
+    group.add(head);
+    
+    return group;
   }
 
   removeRobot(id: string): void {

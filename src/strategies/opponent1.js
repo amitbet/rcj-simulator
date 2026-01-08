@@ -7,11 +7,105 @@
 var searchTime = 0;
 var lastBallVisible = true;
 
+// Line crossing backoff state
+var backingUpFromLine = false;
+var backoffDistance = 0; // cm moved in reverse direction so far
+var reverseDirection = { x: 0, y: 0 }; // Direction to reverse (normalized)
+const BACKOFF_TARGET_CM = 5; // Move 10cm in opposite direction before resuming
+
 function strategy(worldState) {
-  const { ball, goal_blue, bumper_front, bumper_left, bumper_right, stuck, dt_s } = worldState;
+  const { ball, goal_blue, bumper_front, bumper_left, bumper_right, 
+          line_front, line_left, line_right, line_rear, stuck, dt_s } = worldState;
   
   let motor1 = 0, motor2 = 0, motor3 = 0, motor4 = 0;
   let kick = false;
+  
+  // --- HANDLE LINE SENSORS - Reverse direction 10cm when line crossed ---
+  // Motor value 0.5 with max speed 150cm/s = 75cm/s
+  const BACKOFF_MOTOR_VALUE = 0.5;
+  const MAX_ROBOT_SPEED_CM_S = 150;
+  const BACKOFF_SPEED_CM_S = BACKOFF_MOTOR_VALUE * MAX_ROBOT_SPEED_CM_S; // 75 cm/s
+  const BACKOFF_DISTANCE_PER_STEP = BACKOFF_SPEED_CM_S * dt_s; // Distance moved this step (cm)
+  
+  // Estimate current movement direction
+  let currentDirection = { x: 0, y: 1 }; // Default: forward
+  if (ball.visible) {
+    const ballAngleRad = (ball.angle_deg * Math_PI) / 180;
+    currentDirection = {
+      x: Math_sin(ballAngleRad),
+      y: Math_cos(ballAngleRad)
+    };
+  }
+  
+  // --- HANDLE LINE SENSORS - HIGHEST PRIORITY: Never cross lines ---
+  // If ANY line is detected, immediately back away and don't resume until line is clear
+  if (line_front || line_left || line_right || line_rear) {
+    // Start or continue backing away
+    if (!backingUpFromLine) {
+      backingUpFromLine = true;
+      backoffDistance = 0;
+      
+      // Determine reverse direction based on which line was hit
+      if (line_front) {
+        reverseDirection = { x: 0, y: -1 }; // Back away
+        if (line_left) reverseDirection = { x: 0.5, y: -0.5 };
+        else if (line_right) reverseDirection = { x: -0.5, y: -0.5 };
+      } else if (line_rear) {
+        reverseDirection = { x: 0, y: 1 }; // Move forward
+      } else if (line_left) {
+        reverseDirection = { x: 1, y: 0 }; // Move right
+      } else if (line_right) {
+        reverseDirection = { x: -1, y: 0 }; // Move left
+      }
+    }
+    
+    // Continue backing away while line is detected
+    const BACKOFF_MOTOR_VALUE = 0.6;
+    const forwardSpeed = reverseDirection.y * BACKOFF_MOTOR_VALUE;
+    const strafeSpeed = reverseDirection.x * BACKOFF_MOTOR_VALUE * 0.7;
+    
+    if (Math_abs(strafeSpeed) > 0.1) {
+      motor1 = strafeSpeed;
+      motor2 = -strafeSpeed;
+      motor3 = strafeSpeed;
+      motor4 = -strafeSpeed;
+    }
+    if (Math_abs(forwardSpeed) > 0.1) {
+      motor1 += forwardSpeed;
+      motor2 += forwardSpeed;
+      motor3 += forwardSpeed;
+      motor4 += forwardSpeed;
+    }
+    
+    // CRITICAL: Don't resume normal strategy while ANY line is detected
+    return { motor1, motor2, motor3, motor4, kick };
+  } else {
+    // No line detected - reset backoff state
+    if (backingUpFromLine) {
+      backoffDistance += 0.5;
+      if (backoffDistance >= BACKOFF_TARGET_CM) {
+        backingUpFromLine = false;
+        backoffDistance = 0;
+      } else {
+        const BACKOFF_MOTOR_VALUE = 0.4;
+        const forwardSpeed = reverseDirection.y * BACKOFF_MOTOR_VALUE;
+        const strafeSpeed = reverseDirection.x * BACKOFF_MOTOR_VALUE * 0.7;
+        if (Math_abs(strafeSpeed) > 0.1) {
+          motor1 = strafeSpeed;
+          motor2 = -strafeSpeed;
+          motor3 = strafeSpeed;
+          motor4 = -strafeSpeed;
+        }
+        if (Math_abs(forwardSpeed) > 0.1) {
+          motor1 += forwardSpeed;
+          motor2 += forwardSpeed;
+          motor3 += forwardSpeed;
+          motor4 += forwardSpeed;
+        }
+        return { motor1, motor2, motor3, motor4, kick };
+      }
+    }
+  }
   
   // Handle stuck/wall
   if (stuck) {
@@ -89,7 +183,8 @@ function strategy(worldState) {
   // Turn to face ball
   if (Math_abs(ballAngle) > 15) {
     const turn = clamp(ballAngle / 40, -1, 1) * 0.6;
-    const forwardSpeed = ballDist > 50 ? 0.2 : 0;
+    // Always add forward motion when turning toward ball (more when ball is farther)
+    const forwardSpeed = clamp(ballDist / 150, 0.2, 0.5);
     motor1 = forwardSpeed - turn;
     motor4 = forwardSpeed - turn;
     motor2 = forwardSpeed + turn;
