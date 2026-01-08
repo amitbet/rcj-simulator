@@ -171,6 +171,10 @@ export class SimulationEngine {
       this.handleOutOfBounds(side);
     });
 
+    this.physics.setOnRobotOutOfBounds((robotId, goalArea) => {
+      this.handleRobotOutOfBounds(robotId, goalArea);
+    });
+
     this.physics.setOnCollision((a, b) => {
       // Track last touch for determining possession
       if (a === 'ball' || b === 'ball') {
@@ -206,6 +210,15 @@ export class SimulationEngine {
     this.gameState.kickoff_team = scoringTeam === 'blue' ? 'yellow' : 'blue';
 
     this.onGameEvent?.('goal', { team: scoringTeam, score: this.getScore() });
+  }
+
+  // Handle robot out of bounds (in goal area)
+  private handleRobotOutOfBounds(robotId: string, goalArea: 'blue' | 'yellow'): void {
+    // Immediately move robot outside goal area
+    this.physics.moveRobotOutsideGoalArea(robotId, goalArea);
+    
+    // Log for debugging
+    console.log(`[handleRobotOutOfBounds] Robot ${robotId} moved outside ${goalArea} goal area`);
   }
 
   // Handle ball out of bounds

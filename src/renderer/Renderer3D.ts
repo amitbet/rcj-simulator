@@ -225,17 +225,67 @@ export class Renderer3D {
 
   private createGoals(): void {
     const halfH = FIELD.HEIGHT / 2;
+    const goalAreaW = FIELD.PENALTY_AREA_WIDTH;
+    const goalAreaD = FIELD.PENALTY_AREA_DEPTH;
 
     // Blue goal
     const blueGoal = this.createGoalMesh(0x0066cc);
     blueGoal.position.set(0, 0, -halfH - GOAL.DEPTH / 2);
     this.field!.add(blueGoal);
 
+    // Blue goal area (penalty area) - IN FRONT of goal (on field side)
+    // Rectangle extends from goal line (z=-halfH) toward center
+    const blueGoalArea = this.createGoalAreaLine();
+    blueGoalArea.position.set(0, 0.1, -halfH + goalAreaD / 2);
+    this.field!.add(blueGoalArea);
+
     // Yellow goal
     const yellowGoal = this.createGoalMesh(0xffcc00);
     yellowGoal.position.set(0, 0, halfH + GOAL.DEPTH / 2);
     yellowGoal.rotation.y = Math.PI;
     this.field!.add(yellowGoal);
+
+    // Yellow goal area (penalty area) - IN FRONT of goal (on field side)
+    // Rectangle extends from goal line (z=halfH) toward center
+    // Need to flip it 180° so front line is toward center, not at goal
+    const yellowGoalArea = this.createGoalAreaLine();
+    yellowGoalArea.rotation.y = Math.PI; // Rotate 180° to flip the rectangle
+    yellowGoalArea.position.set(0, 0.1, halfH - goalAreaD / 2);
+    this.field!.add(yellowGoalArea);
+  }
+
+  private createGoalAreaLine(): THREE.Group {
+    const group = new THREE.Group();
+    const goalAreaW = FIELD.PENALTY_AREA_WIDTH;
+    const goalAreaD = FIELD.PENALTY_AREA_DEPTH;
+    const lineHeight = 0.2;
+    const lineMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+
+    // Front line (closest to field)
+    const frontLine = new THREE.Mesh(
+      new THREE.BoxGeometry(goalAreaW, lineHeight, FIELD.LINE_WIDTH),
+      lineMat
+    );
+    frontLine.position.set(0, 0, goalAreaD / 2);
+    group.add(frontLine);
+
+    // Left side line
+    const leftLine = new THREE.Mesh(
+      new THREE.BoxGeometry(FIELD.LINE_WIDTH, lineHeight, goalAreaD),
+      lineMat
+    );
+    leftLine.position.set(-goalAreaW / 2, 0, 0);
+    group.add(leftLine);
+
+    // Right side line
+    const rightLine = new THREE.Mesh(
+      new THREE.BoxGeometry(FIELD.LINE_WIDTH, lineHeight, goalAreaD),
+      lineMat
+    );
+    rightLine.position.set(goalAreaW / 2, 0, 0);
+    group.add(rightLine);
+
+    return group;
   }
 
   private createGoalMesh(color: number): THREE.Group {

@@ -38,6 +38,7 @@ export class PhysicsEngine {
   // Collision callbacks
   private onGoalScored: ((team: Team) => void) | null = null;
   private onOutOfBounds: ((side: 'top' | 'bottom' | 'left' | 'right') => void) | null = null;
+  private onRobotOutOfBounds: ((robotId: string, goalArea: 'blue' | 'yellow') => void) | null = null;
   private onCollision: ((a: string, b: string) => void) | null = null;
   
   // Track out of bounds timing for debouncing
@@ -434,6 +435,48 @@ export class PhysicsEngine {
     if (!this.outOfBoundsCheckDisabled) {
       this.checkBallOutOfBounds();
     }
+    
+    // Check for robots in goal areas (out of bounds for robots)
+    this.checkRobotsInGoalAreas();
+  }
+
+  // Check if robots are in goal areas (out of bounds for robots)
+  // Goal areas are IN FRONT of each goal (on the field side), not behind
+  private checkRobotsInGoalAreas(): void {
+    if (!this.onRobotOutOfBounds) return;
+    
+    const halfH = FIELD.HEIGHT / 2;
+    const goalAreaW = FIELD.PENALTY_AREA_WIDTH / 2; // half-width
+    const goalAreaD = FIELD.PENALTY_AREA_DEPTH;
+    const robotRadius = ROBOT.RADIUS;
+    
+    // Blue goal area (top) - rectangle IN FRONT of goal (toward center)
+    // Blue goal is at y = -halfH, area extends from goal line toward center
+    const blueGoalAreaStart = -halfH; // Goal line
+    const blueGoalAreaEnd = -halfH + goalAreaD; // Extends toward center
+    
+    // Yellow goal area (bottom) - rectangle IN FRONT of goal (toward center)
+    // Yellow goal is at y = halfH, area extends from goal line toward center
+    const yellowGoalAreaStart = halfH - goalAreaD; // Extends toward center
+    const yellowGoalAreaEnd = halfH; // Goal line
+    
+    for (const [id, robot] of this.robots) {
+      const pos = robot.body.position;
+      
+      // Check if robot center is in blue goal area (in front of blue goal)
+      if (pos.y >= blueGoalAreaStart && pos.y <= blueGoalAreaEnd &&
+          Math.abs(pos.x) <= goalAreaW + robotRadius) {
+        this.onRobotOutOfBounds(id, 'blue');
+        continue;
+      }
+      
+      // Check if robot center is in yellow goal area (in front of yellow goal)
+      if (pos.y >= yellowGoalAreaStart && pos.y <= yellowGoalAreaEnd &&
+          Math.abs(pos.x) <= goalAreaW + robotRadius) {
+        this.onRobotOutOfBounds(id, 'yellow');
+        continue;
+      }
+    }
   }
 
   // Check if ball is out of bounds (crossed field lines into outer area)
@@ -538,6 +581,10 @@ export class PhysicsEngine {
     this.onOutOfBounds = callback;
   }
 
+  setOnRobotOutOfBounds(callback: (robotId: string, goalArea: 'blue' | 'yellow') => void): void {
+    this.onRobotOutOfBounds = callback;
+  }
+
   setOnCollision(callback: (a: string, b: string) => void): void {
     this.onCollision = callback;
   }
@@ -553,6 +600,62 @@ export class PhysicsEngine {
     if (enabled) {
       this.lastOutOfBoundsTime = null; // Reset timer when re-enabling
     }
+  }
+
+  // Move robot outside goal area
+  // Goal areas are IN FRONT of goals (on field side), so move robots toward center
+  moveRobotOutsideGoalArea(robotId: string, goalArea: 'blue' | 'yellow'): void {
+    const robot = this.robots.get(robotId);
+    if (!robot) return;
+    
+    const pos = robot.body.position;
+    const halfH = FIELD.HEIGHT / 2;
+    const goalAreaW = FIELD.PENALTY_AREA_WIDTH / 2;
+    const goalAreaD = FIELD.PENALTY_AREA_DEPTH;
+    const robotRadius = ROBOT.RADIUS;
+    const margin = robotRadius + 2; // Small margin outside goal area
+    
+    let newX = pos.x;
+    let newY = pos.y;
+    
+    if (goalArea === 'blue') {
+      // Blue goal area is IN FRONT of blue goal (extends from y=-halfH toward center)
+      // Move robot past the goal area, toward center (more positive Y)
+      newY = -halfH + goalAreaD + margin;
+      
+      // If robot is also horizontally in goal area, move it sideways first
+      if (Math.abs(pos.x) <= goalAreaW + robotRadius) {
+        // Move to nearest side outside goal area
+        if (pos.x >= 0) {
+          newX = goalAreaW + margin;
+        } else {
+          newX = -goalAreaW - margin;
+        }
+      }
+    } else {
+      // Yellow goal area is IN FRONT of yellow goal (extends from y=halfH toward center)
+      // Move robot past the goal area, toward center (more negative Y)
+      newY = halfH - goalAreaD - margin;
+      
+      // If robot is also horizontally in goal area, move it sideways first
+      if (Math.abs(pos.x) <= goalAreaW + robotRadius) {
+        // Move to nearest side outside goal area
+        if (pos.x >= 0) {
+          newX = goalAreaW + margin;
+        } else {
+          newX = -goalAreaW - margin;
+        }
+      }
+    }
+    
+    // Clamp to field bounds
+    const fieldHalfW = FIELD.WIDTH / 2 - robotRadius;
+    const fieldHalfH = FIELD.HEIGHT / 2 - robotRadius;
+    newX = Math.max(-fieldHalfW, Math.min(fieldHalfW, newX));
+    newY = Math.max(-fieldHalfH, Math.min(fieldHalfH, newY));
+    
+    Body.setPosition(robot.body, { x: newX, y: newY });
+    Body.setVelocity(robot.body, { x: 0, y: 0 });
   }
 
   // Move robots away from a position (for out of bounds repositioning)

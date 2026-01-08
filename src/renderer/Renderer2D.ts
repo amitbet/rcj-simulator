@@ -236,6 +236,8 @@ export class Renderer2D {
   private drawGoals(): void {
     const { ctx } = this;
     const halfH = FIELD.HEIGHT / 2;
+    const goalAreaW = FIELD.PENALTY_AREA_WIDTH;
+    const goalAreaD = FIELD.PENALTY_AREA_DEPTH;
 
     ctx.save();
     ctx.translate(this.offsetX, this.offsetY);
@@ -248,12 +250,24 @@ export class Renderer2D {
     ctx.lineWidth = 1;
     ctx.strokeRect(-GOAL.WIDTH / 2, -halfH - GOAL.DEPTH, GOAL.WIDTH, GOAL.DEPTH);
 
+    // Blue goal area (penalty area) - IN FRONT of goal (on field side)
+    // Rectangle extends from goal line toward center
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = FIELD.LINE_WIDTH;
+    ctx.strokeRect(-goalAreaW / 2, -halfH, goalAreaW, goalAreaD);
+
     // Yellow goal (bottom)
     ctx.fillStyle = COLORS.GOAL_YELLOW;
     ctx.fillRect(-GOAL.WIDTH / 2, halfH, GOAL.WIDTH, GOAL.DEPTH);
     ctx.strokeStyle = '#cc9900';
     ctx.lineWidth = 1;
     ctx.strokeRect(-GOAL.WIDTH / 2, halfH, GOAL.WIDTH, GOAL.DEPTH);
+
+    // Yellow goal area (penalty area) - IN FRONT of goal (on field side)
+    // Rectangle extends from goal line toward center
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = FIELD.LINE_WIDTH;
+    ctx.strokeRect(-goalAreaW / 2, halfH - goalAreaD, goalAreaW, goalAreaD);
 
     ctx.restore();
   }
