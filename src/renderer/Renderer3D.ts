@@ -288,91 +288,87 @@ export class Renderer3D {
 
   createRobot(id: string, team: Team, role: RobotRole): void {
     const robot = new THREE.Group();
-    const notchAngle = (ROBOT.NOTCH_ANGLE * Math.PI) / 180;
-    const bodyHeight = ROBOT.HEIGHT * 0.6;
-
-    // Main body - create pac-man shaped geometry using ExtrudeGeometry
-    const shape = new THREE.Shape();
     const radius = ROBOT.RADIUS;
-    
-    // Draw pac-man shape (circle with wedge notch at front/+X direction)
-    shape.moveTo(0, 0);
-    // Arc from bottom edge of notch, around the back, to top edge of notch
-    const startAngle = notchAngle / 2;
-    const endAngle = 2 * Math.PI - notchAngle / 2;
-    const segments = 32;
-    for (let i = 0; i <= segments; i++) {
-      const angle = startAngle + (endAngle - startAngle) * (i / segments);
-      shape.lineTo(radius * Math.cos(angle), radius * Math.sin(angle));
-    }
-    shape.lineTo(0, 0);
+    const bodyHeight = ROBOT.HEIGHT * 0.5;
+    const lowerHeight = bodyHeight * 0.4; // lower segment with divet
+    const upperHeight = bodyHeight - lowerHeight; // solid top segment
+    const clearance = 0.001; // gap from ground to bottom (visible lift)
+    robot.userData.clearance = clearance;
 
-    const extrudeSettings = {
-      depth: bodyHeight,
-      bevelEnabled: false,
-    };
-    const bodyGeom = new THREE.ExtrudeGeometry(shape, extrudeSettings);
     const bodyMat = new THREE.MeshStandardMaterial({
       color: team === 'blue' ? 0x2196F3 : 0xFFC107,
       roughness: 0.4,
       metalness: 0.2,
     });
-    const body = new THREE.Mesh(bodyGeom, bodyMat);
-    body.castShadow = true;
-    // Rotate so Y is up and the notch faces +X
-    body.rotation.x = -Math.PI / 2;
-    body.position.y = bodyHeight;
-    robot.add(body);
 
-    // Kicker plate inside the notch (dark triangular area visible from front)
-    const kickerShape = new THREE.Shape();
-    kickerShape.moveTo(0, 0);
-    kickerShape.lineTo(radius * 0.7, 0);
-    kickerShape.lineTo(radius * Math.cos(-notchAngle / 2), radius * Math.sin(-notchAngle / 2));
-    kickerShape.lineTo(0, 0);
-    kickerShape.lineTo(radius * Math.cos(notchAngle / 2), radius * Math.sin(notchAngle / 2));
-    kickerShape.lineTo(radius * 0.7, 0);
-    
-    const kickerGeom = new THREE.ExtrudeGeometry(kickerShape, { depth: bodyHeight * 0.9, bevelEnabled: false });
-    const kickerMat = new THREE.MeshStandardMaterial({ color: 0x333333, roughness: 0.8 });
-    const kicker = new THREE.Mesh(kickerGeom, kickerMat);
-    kicker.rotation.x = -Math.PI / 2;
-    kicker.position.y = bodyHeight * 0.95;
-    robot.add(kicker);
+    // Lower body with carved divet (pac-man wedge) using extrude
+    const notchAngle = (ROBOT.NOTCH_ANGLE * Math.PI) / 180;
+    const lowerShape = new THREE.Shape();
+    lowerShape.moveTo(0, 0);
+    const startAngle = notchAngle / 2;
+    const endAngle = 2 * Math.PI - notchAngle / 2;
+    const segments = 32;
+    for (let i = 0; i <= segments; i++) {
+      const angle = startAngle + (endAngle - startAngle) * (i / segments);
+      lowerShape.lineTo(radius * Math.cos(angle), radius * Math.sin(angle));
+    }
+    lowerShape.lineTo(0, 0);
+    const lowerGeom = new THREE.ExtrudeGeometry(lowerShape, { depth: lowerHeight, bevelEnabled: false });
+    const lower = new THREE.Mesh(lowerGeom, bodyMat);
+    lower.castShadow = true;
+    lower.rotation.x = -Math.PI / 2;
+    lower.position.y = lowerHeight / 2; // sits at group origin
+    robot.add(lower);
+
+    // Open notch: no plate/liner, hollow for visual divet
+
+    // Upper body - solid cylinder without divet
+    const upperGeom = new THREE.CylinderGeometry(radius, radius, upperHeight, 32);
+    const upper = new THREE.Mesh(upperGeom, bodyMat);
+    upper.castShadow = true;
+    upper.position.y = lowerHeight + upperHeight / 2;
+    robot.add(upper);
 
     // Top plate (darker accent)
-    const topGeom = new THREE.CylinderGeometry(ROBOT.RADIUS - 1, ROBOT.RADIUS - 1, 2, 32);
+    const topGeom = new THREE.CylinderGeometry(radius - 1, radius - 1, 1.5, 32);
     const topMat = new THREE.MeshStandardMaterial({
       color: team === 'blue' ? 0x1565C0 : 0xF57C00,
       roughness: 0.3,
     });
     const top = new THREE.Mesh(topGeom, topMat);
-    top.position.y = bodyHeight + 1;
+    top.position.y = bodyHeight + 0.35;
     robot.add(top);
 
     // Role indicator (colored sphere on top: red=attacker, green=defender)
-    const markerGeom = new THREE.SphereGeometry(1.5, 16, 16);
+    const markerGeom = new THREE.SphereGeometry(1.2, 16, 16);
     const markerMat = new THREE.MeshBasicMaterial({
       color: role === 'attacker' ? 0xff4444 : 0x44ff44,
     });
     const marker = new THREE.Mesh(markerGeom, markerMat);
-    marker.position.y = bodyHeight + 3;
+    marker.position.y = bodyHeight + 0.5;
     robot.add(marker);
 
-    // Wheels (4 omni wheels at 45 degree angles)
-    const wheelGeom = new THREE.CylinderGeometry(3, 3, 2, 16);
-    const wheelMat = new THREE.MeshStandardMaterial({ color: 0x333333, roughness: 0.8 });
+    // Omni wheels - thin, inside body, arranged at 45° angles pointing toward center
+    const wheelRadius = 2.5;
+    const wheelThickness = 0.8; // Thin omni wheels
+    const wheelGeom = new THREE.CylinderGeometry(wheelRadius, wheelRadius, wheelThickness, 16);
+    const wheelMat = new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.6 });
+    
+    // Wheels at 45° positions but rotated to face toward center (tangent to circle)
     const wheelAngles = [Math.PI / 4, 3 * Math.PI / 4, 5 * Math.PI / 4, 7 * Math.PI / 4];
+    const wheelDist = radius - wheelRadius - 1; // Inside the body
     
     for (const angle of wheelAngles) {
       const wheel = new THREE.Mesh(wheelGeom, wheelMat);
-      wheel.rotation.z = Math.PI / 2;
-      wheel.position.set(
-        (ROBOT.RADIUS - 3) * Math.cos(angle),
-        3,
-        (ROBOT.RADIUS - 3) * Math.sin(angle)
-      );
-      wheel.rotation.y = angle;
+      // Position inside the robot body
+        wheel.position.set(
+          wheelDist * Math.cos(angle),
+          wheelRadius, // Just above ground relative to group
+          wheelDist * Math.sin(angle)
+        );
+      // Rotate wheel to be tangent to the circle (perpendicular to radius)
+      wheel.rotation.z = Math.PI / 2; // Lay flat
+      wheel.rotation.y = angle + Math.PI / 2; // Tangent direction
       robot.add(wheel);
     }
 
@@ -404,7 +400,8 @@ export class Renderer3D {
       }
 
       if (robot) {
-        robot.position.set(robotState.x, 0, robotState.y);
+        const clearance = robot.userData.clearance ?? 0;
+        robot.position.set(robotState.x, clearance, robotState.y);
         robot.rotation.y = -robotState.angle + Math.PI / 2;
       }
     }
