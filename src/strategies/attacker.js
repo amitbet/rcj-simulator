@@ -18,7 +18,8 @@ var lastBallVisible = true;
 var repositionDir = 1; // 1 = go right, -1 = go left
 
 function strategy(worldState) {
-  const { ball, goal_blue, goal_yellow, we_are_blue, bumper_front, bumper_left, bumper_right, stuck, t_ms, dt_s } = worldState;
+  const { ball, goal_blue, goal_yellow, we_are_blue, bumper_front, bumper_left, bumper_right, 
+          line_front, line_left, line_right, line_rear, stuck, t_ms, dt_s } = worldState;
   
   // Target goal (opponent's goal - where we want to kick the ball)
   const targetGoal = we_are_blue ? goal_yellow : goal_blue;
@@ -45,6 +46,42 @@ function strategy(worldState) {
   function strafe(speed) {
     // Omni-wheel strafe: diagonal motors work together
     setMotors(speed, -speed, speed, -speed);
+  }
+  
+  // --- HANDLE LINE SENSORS - AVOID CROSSING WHITE LINES ---
+  // Line sensors detect white lines (field boundaries and goal area lines)
+  // Back up and turn away when a line is detected
+  if (line_front) {
+    // Line detected in front - back up and turn away
+    drive(-0.6);
+    if (line_left) {
+      turn(0.5); // Turn right if line also on left
+    } else if (line_right) {
+      turn(-0.5); // Turn left if line also on right
+    } else {
+      turn(0.3); // Default turn right
+    }
+    return { motor1, motor2, motor3, motor4, kick };
+  }
+  
+  if (line_left) {
+    // Line detected on left - turn right and move forward slightly
+    turn(0.5);
+    drive(0.2);
+    return { motor1, motor2, motor3, motor4, kick };
+  }
+  
+  if (line_right) {
+    // Line detected on right - turn left and move forward slightly
+    turn(-0.5);
+    drive(0.2);
+    return { motor1, motor2, motor3, motor4, kick };
+  }
+  
+  if (line_rear) {
+    // Line detected behind - move forward (we're backing into a line)
+    drive(0.4);
+    return { motor1, motor2, motor3, motor4, kick };
   }
   
   // --- HANDLE STUCK/WALL SITUATIONS ---

@@ -15,7 +15,8 @@ var searchTime = 0;
 var lastBallVisible = true;
 
 function strategy(worldState) {
-  const { ball, goal_blue, goal_yellow, we_are_blue, bumper_front, bumper_left, bumper_right, stuck, dt_s } = worldState;
+  const { ball, goal_blue, goal_yellow, we_are_blue, bumper_front, bumper_left, bumper_right,
+          line_front, line_left, line_right, line_rear, stuck, dt_s } = worldState;
   
   // Our goal (the one we defend)
   const ownGoal = we_are_blue ? goal_blue : goal_yellow;
@@ -25,6 +26,52 @@ function strategy(worldState) {
   
   // Defense zone - don't go too far from goal
   const MAX_DISTANCE_FROM_GOAL = 80;
+  
+  // --- HANDLE LINE SENSORS - AVOID CROSSING WHITE LINES ---
+  if (line_front) {
+    // Line detected in front - back up and turn away
+    motor1 = -0.6;
+    motor2 = -0.6;
+    motor3 = -0.6;
+    motor4 = -0.6;
+    if (line_left) {
+      motor1 += 0.4; motor4 += 0.4; motor2 -= 0.4; motor3 -= 0.4; // Turn right
+    } else if (line_right) {
+      motor1 -= 0.4; motor4 -= 0.4; motor2 += 0.4; motor3 += 0.4; // Turn left
+    } else {
+      motor1 += 0.3; motor4 += 0.3; motor2 -= 0.3; motor3 -= 0.3; // Default turn right
+    }
+    return { motor1, motor2, motor3, motor4, kick };
+  }
+  
+  if (line_left) {
+    // Line detected on left - turn right and move forward slightly
+    motor1 = -0.4;
+    motor4 = -0.4;
+    motor2 = 0.4;
+    motor3 = 0.4;
+    motor1 += 0.2; motor2 += 0.2; motor3 += 0.2; motor4 += 0.2; // Add forward motion
+    return { motor1, motor2, motor3, motor4, kick };
+  }
+  
+  if (line_right) {
+    // Line detected on right - turn left and move forward slightly
+    motor1 = 0.4;
+    motor4 = 0.4;
+    motor2 = -0.4;
+    motor3 = -0.4;
+    motor1 += 0.2; motor2 += 0.2; motor3 += 0.2; motor4 += 0.2; // Add forward motion
+    return { motor1, motor2, motor3, motor4, kick };
+  }
+  
+  if (line_rear) {
+    // Line detected behind - move forward (we're backing into a line)
+    motor1 = 0.4;
+    motor2 = 0.4;
+    motor3 = 0.4;
+    motor4 = 0.4;
+    return { motor1, motor2, motor3, motor4, kick };
+  }
   
   // --- HANDLE STUCK/WALL SITUATIONS ---
   if (stuck || bumper_front) {

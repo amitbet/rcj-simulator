@@ -55,6 +55,12 @@ export class ObservationSystem {
     const bumperLeft = this.checkBumper(x, y, angle, Math.PI / 2);
     const bumperRight = this.checkBumper(x, y, angle, -Math.PI / 2);
 
+    // Check line sensors (detect white lines: field boundaries and goal area lines)
+    const lineFront = this.checkLineSensor(x, y, angle, 0);
+    const lineLeft = this.checkLineSensor(x, y, angle, Math.PI / 2);
+    const lineRight = this.checkLineSensor(x, y, angle, -Math.PI / 2);
+    const lineRear = this.checkLineSensor(x, y, angle, Math.PI);
+
     // Check if stuck (very low speed despite motors running)
     const stuck = speed < 1 && deltaS > 0.1;
 
@@ -70,6 +76,10 @@ export class ObservationSystem {
       bumper_front: bumperFront,
       bumper_left: bumperLeft,
       bumper_right: bumperRight,
+      line_front: lineFront,
+      line_left: lineLeft,
+      line_right: lineRight,
+      line_rear: lineRear,
       stuck,
       stuck_confidence: stuck ? 0.8 : 0,
       we_are_blue: isBlueTeam,
@@ -155,6 +165,70 @@ export class ObservationSystem {
     // Check if point is outside outer bounds (near walls)
     return checkX < -outerHalfW + 5 || checkX > outerHalfW - 5 || 
            checkY < -outerHalfH + 5 || checkY > outerHalfH - 5;
+  }
+
+  // Check line sensor - detects white lines (field boundaries and goal area lines)
+  // Line sensors are typically positioned at the front, sides, and rear of the robot
+  private checkLineSensor(
+    robotX: number,
+    robotY: number,
+    robotAngle: number,
+    sensorOffset: number // 0 = front, PI/2 = left, -PI/2 = right, PI = rear
+  ): boolean {
+    const sensorAngle = robotAngle + sensorOffset;
+    const sensorDistance = ROBOT.RADIUS + 1; // Line sensors are near robot edge
+    
+    const sensorX = robotX + Math.cos(sensorAngle) * sensorDistance;
+    const sensorY = robotY + Math.sin(sensorAngle) * sensorDistance;
+
+    const halfW = FIELD.WIDTH / 2;
+    const halfH = FIELD.HEIGHT / 2;
+    const goalAreaW = FIELD.PENALTY_AREA_WIDTH / 2;
+    const goalAreaD = FIELD.PENALTY_AREA_DEPTH;
+    const lineTolerance = FIELD.LINE_WIDTH / 2 + 1; // Detect within line width + small margin
+
+    // Check field boundary lines (white lines marking field edges)
+    // Top boundary (blue goal side)
+    if (Math.abs(sensorY - (-halfH)) < lineTolerance && Math.abs(sensorX) > GOAL.WIDTH / 2) {
+      return true;
+    }
+    // Bottom boundary (yellow goal side)
+    if (Math.abs(sensorY - halfH) < lineTolerance && Math.abs(sensorX) > GOAL.WIDTH / 2) {
+      return true;
+    }
+    // Left boundary
+    if (Math.abs(sensorX - (-halfW)) < lineTolerance) {
+      return true;
+    }
+    // Right boundary
+    if (Math.abs(sensorX - halfW) < lineTolerance) {
+      return true;
+    }
+
+    // Check goal area lines (penalty area rectangles)
+    // Blue goal area (top) - rectangle from y=-halfH to y=-halfH+goalAreaD
+    if (sensorY >= -halfH - lineTolerance && sensorY <= -halfH + goalAreaD + lineTolerance &&
+        Math.abs(sensorX) <= goalAreaW + lineTolerance) {
+      // Check if on the front line (furthest from goal) or side lines
+      if (Math.abs(sensorY - (-halfH + goalAreaD)) < lineTolerance || // Front line
+          Math.abs(sensorX - (-goalAreaW)) < lineTolerance || // Left side
+          Math.abs(sensorX - goalAreaW) < lineTolerance) { // Right side
+        return true;
+      }
+    }
+
+    // Yellow goal area (bottom) - rectangle from y=halfH-goalAreaD to y=halfH
+    if (sensorY >= halfH - goalAreaD - lineTolerance && sensorY <= halfH + lineTolerance &&
+        Math.abs(sensorX) <= goalAreaW + lineTolerance) {
+      // Check if on the front line (furthest from goal) or side lines
+      if (Math.abs(sensorY - (halfH - goalAreaD)) < lineTolerance || // Front line
+          Math.abs(sensorX - (-goalAreaW)) < lineTolerance || // Left side
+          Math.abs(sensorX - goalAreaW) < lineTolerance) { // Right side
+        return true;
+      }
+    }
+
+    return false;
   }
 }
 

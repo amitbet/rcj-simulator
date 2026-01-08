@@ -114,8 +114,7 @@ export class Renderer2D {
       this.drawBall(state.ball.x, state.ball.y);
     }
 
-    // Draw game state overlay
-    this.drawOverlay(state);
+    // Overlay is now handled by App.tsx for both 2D and 3D views
   }
 
   private drawField(): void {
@@ -449,81 +448,7 @@ export class Renderer2D {
     ctx.restore();
   }
 
-  private drawOverlay(state: SimulationState): void {
-    const { ctx, canvas } = this;
-    const { game } = state;
-
-    // Phase-specific overlays
-    if (game.phase === GamePhase.Kickoff || game.phase === GamePhase.Goal || game.phase === GamePhase.OutOfBounds) {
-      // Darken background
-      ctx.fillStyle = 'rgba(0,0,0,0.5)';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-      // Message
-      ctx.fillStyle = COLORS.UI_ACCENT;
-      ctx.font = 'bold 36px Orbitron';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-
-      let message = '';
-      switch (game.phase) {
-        case GamePhase.Kickoff:
-          message = 'KICKOFF';
-          break;
-        case GamePhase.Goal:
-          message = 'GOAL!';
-          break;
-        case GamePhase.OutOfBounds:
-          message = 'OUT OF BOUNDS';
-          break;
-      }
-
-      ctx.fillText(message, canvas.width / 2, canvas.height / 2 - 30);
-
-      // Countdown
-      if (game.countdown_ms > 0) {
-        const seconds = Math.ceil(game.countdown_ms / 1000);
-        ctx.font = 'bold 72px Orbitron';
-        ctx.fillText(seconds.toString(), canvas.width / 2, canvas.height / 2 + 40);
-      }
-    }
-
-    if (game.phase === GamePhase.Finished) {
-      ctx.fillStyle = 'rgba(0,0,0,0.7)';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-      ctx.fillStyle = COLORS.UI_ACCENT;
-      ctx.font = 'bold 48px Orbitron';
-      ctx.textAlign = 'center';
-      ctx.fillText('GAME OVER', canvas.width / 2, canvas.height / 2 - 40);
-
-      ctx.font = 'bold 36px Orbitron';
-      ctx.fillStyle = COLORS.TEAM_BLUE;
-      ctx.fillText(`${game.score_blue}`, canvas.width / 2 - 50, canvas.height / 2 + 30);
-      ctx.fillStyle = '#ffffff';
-      ctx.fillText(' - ', canvas.width / 2, canvas.height / 2 + 30);
-      ctx.fillStyle = COLORS.TEAM_YELLOW;
-      ctx.fillText(`${game.score_yellow}`, canvas.width / 2 + 50, canvas.height / 2 + 30);
-    }
-
-    // Out of bounds indicator
-    if (game.phase === GamePhase.OutOfBounds) {
-      // Flash the boundary
-      const flash = Math.sin(Date.now() / 100) > 0;
-      if (flash) {
-        ctx.save();
-        ctx.translate(this.offsetX, this.offsetY);
-        ctx.scale(this.scale, this.scale);
-        
-        ctx.strokeStyle = '#ff0000';
-        ctx.lineWidth = 3;
-        ctx.setLineDash([5, 5]);
-        ctx.strokeRect(-FIELD.WIDTH / 2, -FIELD.HEIGHT / 2, FIELD.WIDTH, FIELD.HEIGHT);
-        
-        ctx.restore();
-      }
-    }
-  }
+  // Overlay rendering is now handled by App.tsx for consistency across 2D and 3D views
 
   // Resize handler
   resize(): void {

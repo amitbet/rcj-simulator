@@ -38,6 +38,12 @@ export interface WorldState {
   bumper_left: boolean;
   bumper_right: boolean;
 
+  // Line sensors (detect white lines on field)
+  line_front: boolean;      // white line detected in front
+  line_left: boolean;       // white line detected on left
+  line_right: boolean;      // white line detected on right
+  line_rear: boolean;       // white line detected behind
+
   // "Am I stuck?" signals
   stuck: boolean;
   stuck_confidence: number;
@@ -174,6 +180,10 @@ export function createDefaultWorldState(): WorldState {
     bumper_front: false,
     bumper_left: false,
     bumper_right: false,
+    line_front: false,
+    line_left: false,
+    line_right: false,
+    line_rear: false,
     stuck: false,
     stuck_confidence: 0,
     we_are_blue: true,
