@@ -91,57 +91,60 @@ function strategy(worldState) {
   // --- BALL IS VISIBLE ---
   const ballAngle = ball.angle_deg;  // positive = ball is to our right
   const ballDist = ball.distance;
-  
-  // CASE 1: Very close to ball - PUSH and KICK!
-  if (ballDist < 25) {
-    // Drive forward at full speed
-    motor1 = 1.0;
-    motor2 = 1.0;
-    motor3 = 1.0;
-    motor4 = 1.0;
-    
-    // Small steering correction to stay on target
-    const steer = clamp(ballAngle / 45, -0.3, 0.3);
-    motor1 -= steer;
-    motor4 -= steer;
-    motor2 += steer;
-    motor3 += steer;
-    
-    // KICK!
-    kick = true;
-    
+  const goalAngle = targetGoal.visible ? targetGoal.angle_deg : 0;
+
+  // CASE 1: Ball far and off to the side -> turn in place first
+  if (Math_abs(ballAngle) > 12) {
+    const turnSpeed = clamp(ballAngle / 40, -1, 1) * 0.7;
+    motor1 = -turnSpeed;
+    motor4 = -turnSpeed;
+    motor2 = turnSpeed;
+    motor3 = turnSpeed;
+    // minimal creep only if very far
+    if (ballDist > 80) {
+      const creep = 0.12;
+      motor1 += creep;
+      motor2 += creep;
+      motor3 += creep;
+      motor4 += creep;
+    }
     return { motor1, motor2, motor3, motor4, kick };
   }
-  
-  // CASE 2: Ball is to the side - TURN to face it
-  if (Math_abs(ballAngle) > 15) {
-    // Calculate turn speed - positive angle means turn right
-    const turnSpeed = clamp(ballAngle / 40, -1, 1) * 0.6;
-    
-    // Also move forward slowly while turning to approach ball
-    const forwardSpeed = ballDist > 50 ? 0.2 : 0;
-    
-    motor1 = forwardSpeed - turnSpeed;
-    motor4 = forwardSpeed - turnSpeed;
-    motor2 = forwardSpeed + turnSpeed;
-    motor3 = forwardSpeed + turnSpeed;
-    
+
+  // CASE 2: Approach ball when roughly facing it
+  if (ballDist > 28) {
+    const speed = clamp(0.5 + ballDist / 240, 0.5, 0.9);
+    const steer = clamp(ballAngle / 50, -0.15, 0.15);
+    motor1 = speed - steer;
+    motor4 = speed - steer;
+    motor2 = speed + steer;
+    motor3 = speed + steer;
     return { motor1, motor2, motor3, motor4, kick };
   }
-  
-  // CASE 3: Facing the ball - DRIVE toward it
-  const speed = clamp(0.4 + ballDist / 200, 0.4, 0.85);
-  motor1 = speed;
-  motor2 = speed;
-  motor3 = speed;
-  motor4 = speed;
-  
-  // Fine steering adjustment
-  const steer = clamp(ballAngle / 60, -0.2, 0.2);
-  motor1 -= steer;
-  motor4 -= steer;
-  motor2 += steer;
-  motor3 += steer;
-  
+
+  // CASE 3: Close to ball - fine align with kicker only
+  if (Math_abs(ballAngle) > 5) {
+    const turn = clamp(ballAngle / 30, -1, 1) * 0.55;
+    motor1 = -turn;
+    motor4 = -turn;
+    motor2 = turn;
+    motor3 = turn;
+    return { motor1, motor2, motor3, motor4, kick };
+  }
+
+  // CASE 4: Lined up on ball, push and kick toward goal
+  const goalBias = targetGoal.visible ? clamp(goalAngle / 70, -0.12, 0.12) : 0;
+  const pushSpeed = 0.95;
+  motor1 = pushSpeed - goalBias;
+  motor4 = pushSpeed - goalBias;
+  motor2 = pushSpeed + goalBias;
+  motor3 = pushSpeed + goalBias;
+
+  if (ballDist < 22 && Math_abs(ballAngle) < 5) {
+    if (!targetGoal.visible || Math_abs(goalAngle) < 30) {
+      kick = true;
+    }
+  }
+
   return { motor1, motor2, motor3, motor4, kick };
 }

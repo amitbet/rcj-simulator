@@ -402,7 +402,8 @@ export class Renderer3D {
       if (robot) {
         const clearance = robot.userData.clearance ?? 0;
         robot.position.set(robotState.x, clearance, robotState.y);
-        robot.rotation.y = -robotState.angle + Math.PI / 2;
+        // Render heading matches physics: angle 0 => facing +X
+        robot.rotation.y = -robotState.angle;
       }
     }
 
