@@ -14,10 +14,16 @@ export const GameModeSelector: React.FC<GameModeSelectorProps> = ({ onSelect }) 
 
   const modes = [
     {
-      mode: GameMode.SingleBot,
-      name: 'Single Bot',
-      description: 'One robot vs. the goal. Perfect for testing individual strategies.',
+      mode: GameMode.SingleBotAttacker,
+      name: 'Single Bot Attacker',
+      description: 'One attacker robot vs. the goal. Perfect for testing attacker strategies.',
       icon: '🤖',
+    },
+    {
+      mode: GameMode.SingleBotDefender,
+      name: 'Single Bot Defender',
+      description: 'One defender robot vs. the goal. Perfect for testing defender strategies.',
+      icon: '🛡️',
     },
     {
       mode: GameMode.SingleTeam,

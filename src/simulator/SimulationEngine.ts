@@ -110,8 +110,8 @@ export class SimulationEngine {
     const { mode } = this.config;
 
     // Always create blue team
-    if (mode === GameMode.SingleBot) {
-      // Single bot - either attacker or defender
+    if (mode === GameMode.SingleBotAttacker) {
+      // Single bot attacker
       this.physics.createRobot(
         'blue_attacker',
         'blue',
@@ -119,6 +119,16 @@ export class SimulationEngine {
         STARTING_POSITIONS.blue.attacker.x,
         STARTING_POSITIONS.blue.attacker.y,
         STARTING_POSITIONS.blue.attacker.angle
+      );
+    } else if (mode === GameMode.SingleBotDefender) {
+      // Single bot defender
+      this.physics.createRobot(
+        'blue_defender',
+        'blue',
+        'defender',
+        STARTING_POSITIONS.blue.defender.x,
+        STARTING_POSITIONS.blue.defender.y,
+        STARTING_POSITIONS.blue.defender.angle
       );
     } else {
       // Both blue robots

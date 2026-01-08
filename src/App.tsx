@@ -57,8 +57,8 @@ const App: React.FC = () => {
     
     const config: SimulationConfig = {
       mode,
-      blueAttackerStrategy: strategies.blue_attacker,
-      blueDefenderStrategy: mode !== GameMode.SingleBot ? strategies.blue_defender : undefined,
+      blueAttackerStrategy: (mode === GameMode.SingleBotAttacker || mode === GameMode.SingleTeam || mode === GameMode.TwoTeam) ? strategies.blue_attacker : undefined,
+      blueDefenderStrategy: (mode === GameMode.SingleBotDefender || mode === GameMode.SingleTeam || mode === GameMode.TwoTeam) ? strategies.blue_defender : undefined,
       yellowAttackerStrategy: mode === GameMode.TwoTeam ? strategies.yellow_attacker : undefined,
       yellowDefenderStrategy: mode === GameMode.TwoTeam ? strategies.yellow_defender : undefined,
     };

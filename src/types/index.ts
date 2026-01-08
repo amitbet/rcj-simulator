@@ -64,7 +64,8 @@ export interface Action {
 
 // Game modes
 export enum GameMode {
-  SingleBot = 'single_bot',
+  SingleBotAttacker = 'single_bot_attacker',
+  SingleBotDefender = 'single_bot_defender',
   SingleTeam = 'single_team',
   TwoTeam = 'two_team'
 }

@@ -23,12 +23,18 @@ export const StrategyEditor: React.FC<StrategyEditorProps> = ({
 }) => {
   // Get available tabs based on game mode
   const getTabs = () => {
-    const tabs = [
-      { id: 'blue_attacker', label: 'Blue Attacker', team: 'blue' },
-    ];
+    const tabs = [];
 
-    if (gameMode !== GameMode.SingleBot) {
+    if (gameMode === GameMode.SingleBotAttacker) {
+      tabs.push({ id: 'blue_attacker', label: 'Blue Attacker', team: 'blue' });
+    } else if (gameMode === GameMode.SingleBotDefender) {
       tabs.push({ id: 'blue_defender', label: 'Blue Defender', team: 'blue' });
+    } else {
+      // SingleTeam or TwoTeam - show both blue robots
+      tabs.push(
+        { id: 'blue_attacker', label: 'Blue Attacker', team: 'blue' },
+        { id: 'blue_defender', label: 'Blue Defender', team: 'blue' }
+      );
     }
 
     if (gameMode === GameMode.TwoTeam) {
