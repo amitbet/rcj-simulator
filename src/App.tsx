@@ -281,10 +281,21 @@ const App: React.FC = () => {
               </div>
             )}
 
-            {/* Countdown overlay */}
-            {simulationState?.game.phase === GamePhase.Kickoff && simulationState.game.countdown_ms > 0 && (
+            {/* Game phase overlay (Kickoff, Out of Bounds, Goal) */}
+            {simulationState && (simulationState.game.phase === GamePhase.Kickoff || 
+              simulationState.game.phase === GamePhase.OutOfBounds || 
+              simulationState.game.phase === GamePhase.Goal) && (
               <div className="countdown-overlay">
-                {Math.ceil(simulationState.game.countdown_ms / 1000)}
+                <div className="phase-message">
+                  {simulationState.game.phase === GamePhase.Kickoff && 'KICKOFF'}
+                  {simulationState.game.phase === GamePhase.OutOfBounds && 'OUT OF BOUNDS'}
+                  {simulationState.game.phase === GamePhase.Goal && 'GOAL!'}
+                </div>
+                {simulationState.game.countdown_ms > 0 && (
+                  <div className="countdown-number">
+                    {Math.ceil(simulationState.game.countdown_ms / 1000)}
+                  </div>
+                )}
               </div>
             )}
           </div>
