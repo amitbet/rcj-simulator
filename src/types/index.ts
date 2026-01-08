@@ -112,6 +112,8 @@ export interface RobotState {
   vx: number;              // velocity
   vy: number;
   angularVelocity: number;
+  penalized: boolean;      // true if robot is currently penalized for line crossings
+  penaltyTimeRemaining_ms: number; // time remaining in penalty (0 if not penalized)
 }
 
 // Ball state

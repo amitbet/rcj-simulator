@@ -440,8 +440,21 @@ export class Renderer3D {
       this.ball.position.set(state.ball.x, BALL.RADIUS, state.ball.y);
     }
 
-    // Update robot positions
+    // Update robot positions (skip penalized robots - they're removed from play)
+    // First, remove any robots that are now penalized
+    for (const [id, robot] of this.robots.entries()) {
+      const robotState = state.robots.find(r => r.id === id);
+      if (robotState?.penalized) {
+        // Remove penalized robot from scene
+        this.scene.remove(robot);
+        this.robots.delete(id);
+      }
+    }
+    
+    // Update active (non-penalized) robots
     for (const robotState of state.robots) {
+      if (robotState.penalized) continue; // Skip penalized robots
+      
       let robot = this.robots.get(robotState.id);
       
       if (!robot) {

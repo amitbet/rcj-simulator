@@ -9,6 +9,7 @@ interface ControlPanelProps {
   speed: number;
   onPlayPause: () => void;
   onReset: () => void;
+  onResetMatch: () => void;
   onSpeedChange: (speed: number) => void;
   onNewGame: () => void;
 }
@@ -18,6 +19,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
   speed,
   onPlayPause,
   onReset,
+  onResetMatch,
   onSpeedChange,
   onNewGame,
 }) => {
@@ -55,7 +57,15 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
         <span className="speed-value">{speed}x</span>
       </div>
 
-      <div style={{ marginTop: '16px' }}>
+      <div style={{ marginTop: '16px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+        <button
+          className="btn btn-secondary"
+          onClick={onResetMatch}
+          style={{ width: '100%' }}
+          title="Reset positions to starting positions (keeps score)"
+        >
+          Reset Match
+        </button>
         <button
           className="btn btn-secondary"
           onClick={onNewGame}

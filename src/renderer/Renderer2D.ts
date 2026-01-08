@@ -102,9 +102,9 @@ export class Renderer2D {
     // Draw neutral spots
     this.drawNeutralSpots();
     
-    // Draw robots (only if position is valid)
+    // Draw robots (only if position is valid and not penalized)
     for (const robot of state.robots) {
-      if (isFinite(robot.x) && isFinite(robot.y) && isFinite(robot.angle)) {
+      if (!robot.penalized && isFinite(robot.x) && isFinite(robot.y) && isFinite(robot.angle)) {
         this.drawRobot(robot.x, robot.y, robot.angle, robot.team, robot.role);
       }
     }

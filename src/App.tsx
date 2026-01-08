@@ -163,6 +163,12 @@ const App: React.FC = () => {
     }
   };
 
+  const handleResetMatch = () => {
+    if (simulationRef.current) {
+      simulationRef.current.resetMatch();
+    }
+  };
+
   const handleSpeedChange = (newSpeed: number) => {
     setSpeed(newSpeed);
     if (simulationRef.current) {
@@ -298,6 +304,24 @@ const App: React.FC = () => {
                 )}
               </div>
             )}
+
+            {/* Robot penalty overlays */}
+            {simulationState && simulationState.robots
+              .filter(robot => robot.penalized)
+              .map((robot, index) => (
+                <div key={robot.id} className="penalty-overlay" style={{
+                  top: `${30 + index * 15}%`,
+                  left: '50%',
+                  transform: 'translate(-50%, -50%)',
+                }}>
+                  <div className="penalty-message">
+                    {robot.team.toUpperCase()} {robot.role.toUpperCase()} PENALTY
+                  </div>
+                  <div className="penalty-time">
+                    {Math.ceil(robot.penaltyTimeRemaining_ms / 1000)}s
+                  </div>
+                </div>
+              ))}
           </div>
         </div>
 
@@ -317,6 +341,7 @@ const App: React.FC = () => {
                 speed={speed}
                 onPlayPause={handlePlayPause}
                 onReset={handleReset}
+                onResetMatch={handleResetMatch}
                 onSpeedChange={handleSpeedChange}
                 onNewGame={() => setShowModeSelector(true)}
               />

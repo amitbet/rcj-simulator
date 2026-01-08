@@ -17,7 +17,7 @@ import {
   WorldState,
   createDefaultAction,
 } from '../types';
-import { TIMING, STARTING_POSITIONS, FIELD, ROBOT } from '../types/constants';
+import { TIMING, STARTING_POSITIONS, FIELD, ROBOT, GOAL } from '../types/constants';
 
 export interface SimulationConfig {
   mode: GameMode;
@@ -40,6 +40,20 @@ export class SimulationEngine {
   private animationFrameId: number | null = null;
   private isRunning: boolean = false;
   private speedMultiplier: number = 1;
+
+  // Line crossing penalty tracking
+  private consecutiveLineCrossings: Map<string, number> = new Map(); // robotId -> count
+  private penaltyEndTimes: Map<string, number> = new Map(); // robotId -> end time (ms)
+  private lastLineCrossingTime: Map<string, number> = new Map(); // robotId -> last crossing time
+  private penaltyRobotStates: Map<string, { team: Team; role: RobotRole; x: number; y: number; angle: number }> = new Map(); // robotId -> saved state
+  private readonly LINE_CROSSING_THRESHOLD = 3; // Penalty after 3 consecutive crossings
+  private readonly PENALTY_DURATION_MS = 5000; // 5 seconds penalty
+
+  // Ball unreachable detection
+  private ballLastPosition: { x: number; y: number } | null = null;
+  private ballStuckTime: number = 0;
+  private readonly BALL_STUCK_THRESHOLD_MS = 10000; // 10 seconds without significant movement
+  private readonly BALL_MOVEMENT_THRESHOLD = 5; // cm - ball must move at least this much
 
   // Callbacks
   private onStateUpdate: ((state: SimulationState) => void) | null = null;
@@ -74,6 +88,10 @@ export class SimulationEngine {
   initialize(config: SimulationConfig): void {
     this.config = config;
     this.gameState.mode = config.mode;
+    
+    // Reset ball tracking
+    this.ballStuckTime = 0;
+    this.ballLastPosition = null;
     
     this.physics.initialize();
     this.createRobots();
@@ -171,9 +189,10 @@ export class SimulationEngine {
       this.handleOutOfBounds(side);
     });
 
-    this.physics.setOnRobotOutOfBounds((robotId, goalArea) => {
-      this.handleRobotOutOfBounds(robotId, goalArea);
-    });
+    // Disabled: Robots should move freely - only their strategy prevents crossing lines
+    // this.physics.setOnRobotOutOfBounds((robotId, goalArea) => {
+    //   this.handleRobotOutOfBounds(robotId, goalArea);
+    // });
 
     this.physics.setOnCollision((a, b) => {
       // Track last touch for determining possession
@@ -319,6 +338,9 @@ export class SimulationEngine {
       this.gameState.countdown_ms = 0;
       // Enable out-of-bounds checking when play starts
       this.physics.setOutOfBoundsCheckEnabled(true);
+      // Reset ball tracking when play starts
+      this.ballStuckTime = 0;
+      this.ballLastPosition = null;
       this.onGameEvent?.('kickoff_start', {});
     }
   }
@@ -342,10 +364,14 @@ export class SimulationEngine {
       return;
     }
 
+    // Update penalties (check if any penalties have expired)
+    this.updatePenalties(deltaMs);
+
     // Execute strategies and get actions
     const physicsState = this.physics.getState();
     const robots = this.physics.getRobots();
 
+    // Process all active robots (penalized robots are removed from physics, so they won't be here)
     for (const [id, robot] of robots) {
       // Calculate world state for this robot
       const worldState = this.observationSystem.calculateWorldState(
@@ -355,6 +381,12 @@ export class SimulationEngine {
         deltaMs / 1000,
         robot.team === 'blue'
       );
+
+      // Check for line crossings (using robot center position)
+      const robotState = physicsState.robots.get(id);
+      if (robotState) {
+        this.checkLineCrossings(id, robotState.x, robotState.y);
+      }
 
       // Execute strategy
       const action = this.strategyExecutor.executeStrategy(id, worldState);
@@ -368,6 +400,9 @@ export class SimulationEngine {
 
     // Update referee (check for lack of progress, etc.)
     this.referee.update(deltaMs, physicsState.ball);
+
+    // Check for ball unreachable/stuck situation
+    this.checkBallUnreachable(deltaMs, physicsState.ball);
   }
 
   // Update during out of bounds
@@ -456,6 +491,16 @@ export class SimulationEngine {
     this.pause();
     this.physics.reset();
     
+    // Reset penalty tracking
+    this.consecutiveLineCrossings.clear();
+    this.penaltyEndTimes.clear();
+    this.lastLineCrossingTime.clear();
+    this.penaltyRobotStates.clear();
+    
+    // Reset ball tracking
+    this.ballStuckTime = 0;
+    this.ballLastPosition = null;
+    
     this.gameState = {
       mode: this.config.mode,
       phase: GamePhase.Setup,
@@ -482,13 +527,229 @@ export class SimulationEngine {
     this.speedMultiplier = Math.max(0.1, Math.min(4, multiplier));
   }
 
+  // Check for line crossings and apply penalties (only when robot CENTER crosses a line)
+  private checkLineCrossings(robotId: string, robotX: number, robotY: number): void {
+    const now = this.gameState.time_elapsed_ms;
+    const lastCrossingTime = this.lastLineCrossingTime.get(robotId) || 0;
+    const timeSinceLastCrossing = now - lastCrossingTime;
+    
+    const halfW = FIELD.WIDTH / 2;
+    const halfH = FIELD.HEIGHT / 2;
+    const lineTolerance = FIELD.LINE_WIDTH / 2 + 1; // Detect within line width + small margin
+    
+    // Check if robot CENTER is crossing any field boundary line (white lines)
+    let lineDetected = false;
+    
+    // Top boundary (blue goal side) - check if robot center crosses the line
+    if (Math.abs(robotY - (-halfH)) < lineTolerance && Math.abs(robotX) > GOAL.WIDTH / 2) {
+      lineDetected = true;
+    }
+    // Bottom boundary (yellow goal side)
+    else if (Math.abs(robotY - halfH) < lineTolerance && Math.abs(robotX) > GOAL.WIDTH / 2) {
+      lineDetected = true;
+    }
+    // Left boundary
+    else if (Math.abs(robotX - (-halfW)) < lineTolerance) {
+      lineDetected = true;
+    }
+    // Right boundary
+    else if (Math.abs(robotX - halfW) < lineTolerance) {
+      lineDetected = true;
+    }
+    
+    if (lineDetected) {
+      // Only count as crossing if enough time has passed since last crossing (debounce)
+      // This prevents counting the same crossing multiple times
+      if (timeSinceLastCrossing > 500) { // 500ms debounce
+        const currentCount = this.consecutiveLineCrossings.get(robotId) || 0;
+        const newCount = currentCount + 1;
+        this.consecutiveLineCrossings.set(robotId, newCount);
+        this.lastLineCrossingTime.set(robotId, now);
+        
+        // If threshold reached, apply penalty
+        if (newCount >= this.LINE_CROSSING_THRESHOLD) {
+          this.applyPenalty(robotId);
+        }
+      }
+    } else {
+      // No line detected - reset counter after a delay
+      // This allows for brief gaps between crossings to still count as consecutive
+      if (timeSinceLastCrossing > 2000) { // 2 seconds without crossing resets counter
+        this.consecutiveLineCrossings.set(robotId, 0);
+      }
+    }
+  }
+
+  // Apply penalty to a robot - removes it from play
+  private applyPenalty(robotId: string): void {
+    const endTime = this.gameState.time_elapsed_ms + this.PENALTY_DURATION_MS;
+    this.penaltyEndTimes.set(robotId, endTime);
+    this.consecutiveLineCrossings.set(robotId, 0); // Reset counter
+    
+    // Save robot team and role (position will be restored to starting position)
+    const robots = this.physics.getRobots();
+    const robot = robots.get(robotId);
+    if (robot) {
+      // Save only team and role - position will be starting position when restored
+      this.penaltyRobotStates.set(robotId, {
+        team: robot.team,
+        role: robot.role,
+        x: 0, // Not used - will use starting position
+        y: 0, // Not used - will use starting position
+        angle: 0, // Not used - will use starting position
+      });
+      
+      // Remove robot from physics world (game continues without it)
+      this.physics.removeRobot(robotId);
+    }
+    
+    // Log penalty
+    console.log(`[Penalty] Robot ${robotId} removed from play for ${this.PENALTY_DURATION_MS / 1000}s for repeated line crossings`);
+    
+    this.onGameEvent?.('robot_penalty', { robotId, duration: this.PENALTY_DURATION_MS });
+  }
+
+  // Update penalties (check if any have expired and restore robots)
+  private updatePenalties(deltaMs: number): void {
+    const now = this.gameState.time_elapsed_ms;
+    
+    for (const [robotId, endTime] of this.penaltyEndTimes.entries()) {
+      if (now >= endTime) {
+        // Penalty expired - restore robot at starting position
+        const savedState = this.penaltyRobotStates.get(robotId);
+        if (savedState) {
+          // Get starting position for this robot
+          const startingPos = this.getStartingPosition(savedState.team, savedState.role);
+          
+          // Recreate robot at starting position
+          this.physics.createRobot(
+            robotId,
+            savedState.team,
+            savedState.role,
+            startingPos.x,
+            startingPos.y,
+            startingPos.angle
+          );
+          
+          // Strategy is still loaded in StrategyExecutor (stored by robotId)
+          // No need to reload it
+          
+          this.penaltyRobotStates.delete(robotId);
+          console.log(`[Penalty] Robot ${robotId} restored to play at starting position (${startingPos.x.toFixed(1)}, ${startingPos.y.toFixed(1)})`);
+        }
+        
+        this.penaltyEndTimes.delete(robotId);
+        this.onGameEvent?.('robot_penalty_expired', { robotId });
+      }
+    }
+  }
+
+  // Check if a robot is currently penalized
+  private isPenalized(robotId: string): boolean {
+    return this.penaltyEndTimes.has(robotId);
+  }
+
+  // Get penalty time remaining for a robot
+  private getPenaltyTimeRemaining(robotId: string): number {
+    const endTime = this.penaltyEndTimes.get(robotId);
+    if (!endTime) return 0;
+    const remaining = endTime - this.gameState.time_elapsed_ms;
+    return Math.max(0, remaining);
+  }
+
+  // Check if ball is unreachable or stuck
+  private checkBallUnreachable(deltaMs: number, ballState: { x: number; y: number; vx: number; vy: number }): void {
+    const ballSpeed = Math.sqrt(ballState.vx * ballState.vx + ballState.vy * ballState.vy);
+    
+    // Check if ball has moved significantly
+    if (this.ballLastPosition) {
+      const dx = ballState.x - this.ballLastPosition.x;
+      const dy = ballState.y - this.ballLastPosition.y;
+      const distance = Math.sqrt(dx * dx + dy * dy);
+      
+      if (distance < this.BALL_MOVEMENT_THRESHOLD && ballSpeed < 1) {
+        // Ball hasn't moved much and is slow/stopped
+        this.ballStuckTime += deltaMs;
+      } else {
+        // Ball is moving - reset stuck timer
+        this.ballStuckTime = 0;
+      }
+    }
+    
+    // Update last position
+    this.ballLastPosition = { x: ballState.x, y: ballState.y };
+    
+    // Check if ball is stuck for too long
+    if (this.ballStuckTime >= this.BALL_STUCK_THRESHOLD_MS) {
+      // Check if ball is in an unreachable area (corners, behind goals, etc.)
+      const halfW = FIELD.WIDTH / 2;
+      const halfH = FIELD.HEIGHT / 2;
+      const outerW = FIELD.WIDTH / 2 + FIELD.OUTER_WIDTH;
+      const outerH = FIELD.HEIGHT / 2 + FIELD.OUTER_WIDTH;
+      
+      // Check if ball is in outer area (beyond field lines) or in corners
+      const inOuterArea = Math.abs(ballState.x) > halfW || Math.abs(ballState.y) > halfH;
+      const inCorner = (Math.abs(ballState.x) > halfW - 20 && Math.abs(ballState.y) > halfH - 20) ||
+                       (Math.abs(ballState.x) > outerW - 10) || (Math.abs(ballState.y) > outerH - 10);
+      
+      if (inOuterArea || inCorner) {
+        // Ball is stuck in unreachable area - trigger reset
+        console.log(`[Ball Unreachable] Ball stuck at (${ballState.x.toFixed(1)}, ${ballState.y.toFixed(1)}) for ${(this.ballStuckTime / 1000).toFixed(1)}s`);
+        this.resetMatch();
+        this.ballStuckTime = 0;
+        this.ballLastPosition = null;
+      }
+    }
+  }
+
+  // Reset match positions (keeps score and game state, just resets positions)
+  resetMatch(): void {
+    // Restore any penalized robots at starting positions before resetting positions
+    for (const [robotId, savedState] of this.penaltyRobotStates.entries()) {
+      const startingPos = this.getStartingPosition(savedState.team, savedState.role);
+      this.physics.createRobot(
+        robotId,
+        savedState.team,
+        savedState.role,
+        startingPos.x,
+        startingPos.y,
+        startingPos.angle
+      );
+    }
+    
+    // Reset positions to starting positions
+    this.resetPositions();
+    
+    // Clear penalties
+    this.consecutiveLineCrossings.clear();
+    this.penaltyEndTimes.clear();
+    this.lastLineCrossingTime.clear();
+    this.penaltyRobotStates.clear();
+    
+    // Reset ball tracking
+    this.ballStuckTime = 0;
+    this.ballLastPosition = null;
+    
+    // If paused, resume to kickoff
+    if (this.gameState.phase === GamePhase.Playing || this.gameState.phase === GamePhase.Paused) {
+      this.gameState.phase = GamePhase.Kickoff;
+      this.gameState.countdown_ms = TIMING.KICKOFF_COUNTDOWN;
+      this.physics.setOutOfBoundsCheckEnabled(false);
+    }
+    
+    this.onGameEvent?.('match_reset', {});
+    this.onStateUpdate?.(this.getSimulationState());
+  }
+
   // Get current simulation state
   getSimulationState(): SimulationState {
     const physicsState = this.physics.getState();
     const robots = this.physics.getRobots();
 
-    const robotStates = Array.from(robots.entries()).map(([id, robot]) => {
+    // Get active robots (in physics)
+    const activeRobotStates = Array.from(robots.entries()).map(([id, robot]) => {
       const state = physicsState.robots.get(id);
+      
       return {
         id,
         team: robot.team,
@@ -499,12 +760,37 @@ export class SimulationEngine {
         vx: state?.vx ?? 0,
         vy: state?.vy ?? 0,
         angularVelocity: 0,
+        penalized: false,
+        penaltyTimeRemaining_ms: 0,
       };
     });
 
+    // Get penalized robots (removed from physics but still tracked)
+    const penalizedRobotStates = Array.from(this.penaltyRobotStates.entries()).map(([id, savedState]) => {
+      const penaltyTimeRemaining = this.getPenaltyTimeRemaining(id);
+      const startingPos = this.getStartingPosition(savedState.team, savedState.role);
+      
+      return {
+        id,
+        team: savedState.team,
+        role: savedState.role,
+        x: startingPos.x, // Show starting position (robot will return here)
+        y: startingPos.y,
+        angle: startingPos.angle,
+        vx: 0,
+        vy: 0,
+        angularVelocity: 0,
+        penalized: true,
+        penaltyTimeRemaining_ms: penaltyTimeRemaining,
+      };
+    });
+
+    // Combine active and penalized robots
+    const allRobotStates = [...activeRobotStates, ...penalizedRobotStates];
+
     return {
       game: { ...this.gameState },
-      robots: robotStates,
+      robots: allRobotStates,
       ball: { ...physicsState.ball },
       timestamp: Date.now(),
     };

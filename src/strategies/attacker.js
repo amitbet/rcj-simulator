@@ -23,6 +23,8 @@ function strategy(worldState) {
   
   // Target goal (opponent's goal - where we want to kick the ball)
   const targetGoal = we_are_blue ? goal_yellow : goal_blue;
+  // Own goal (the one we're defending - must avoid scoring here!)
+  const ownGoal = we_are_blue ? goal_blue : goal_yellow;
   
   let motor1 = 0, motor2 = 0, motor3 = 0, motor4 = 0;
   let kick = false;
@@ -128,12 +130,40 @@ function strategy(worldState) {
   const goalAngle = goalVisible ? targetGoal.angle_deg : 0;
   const goalDist = goalVisible ? targetGoal.distance : 200;
   
+  // Check own goal position (CRITICAL: avoid scoring in our own goal!)
+  const ownGoalVisible = ownGoal.visible;
+  const ownGoalAngle = ownGoalVisible ? ownGoal.angle_deg : 0;
+  const ownGoalDist = ownGoalVisible ? ownGoal.distance : 200;
+  
+  // Check if we're aligned with our own goal (dangerous - don't kick!)
+  const alignedWithOwnGoal = ownGoalVisible && Math_abs(ownGoalAngle) < 30;
+  const ownGoalInFront = ownGoalVisible && Math_abs(ownGoalAngle) < 60;
+  
   // Check if we're on the wrong side of the ball
   // If ball is in front but goal is behind us (or very far to the side), we need to reposition
   const ballInFront = Math_abs(ballAngle) < 45;
   const goalBehind = goalVisible && Math_abs(goalAngle) > 120;
   const goalFarSide = goalVisible && Math_abs(goalAngle) > 70;
   const needsRepositioning = ballInFront && ballDist < 60 && (goalBehind || goalFarSide);
+  
+  // CRITICAL: If we're close to ball and aligned with our own goal, reposition immediately!
+  const dangerZone = ballDist < 40 && alignedWithOwnGoal;
+  
+  // --- CRITICAL: AVOID OWN GOAL - Reposition if aligned with own goal ---
+  if (dangerZone) {
+    // We're in danger of scoring in our own goal! Reposition immediately
+    // Turn away from own goal and back up
+    const turnAway = ownGoalAngle > 0 ? -1 : 1; // Turn opposite direction of own goal
+    const backSpeed = -0.7;
+    const turnSpeed = 0.8 * turnAway;
+    
+    motor1 = backSpeed - turnSpeed;
+    motor4 = backSpeed - turnSpeed;
+    motor2 = backSpeed + turnSpeed;
+    motor3 = backSpeed + turnSpeed;
+    
+    return { motor1, motor2, motor3, motor4, kick };
+  }
   
   // --- REPOSITIONING: Go around the ball to get behind it ---
   if (needsRepositioning) {
@@ -156,11 +186,18 @@ function strategy(worldState) {
   
   // --- APPROACH: Ball is far, turn to face it ---
   if (Math_abs(ballAngle) > 15) {
-    const turnSpeed = clamp(ballAngle / 35, -1, 1) * 0.7;
-    turn(turnSpeed);
+    // If own goal is in front and we're turning toward it, turn the other way
+    if (ownGoalInFront && ballDist < 50) {
+      // Turn away from own goal
+      const turnAway = ownGoalAngle > 0 ? -1 : 1;
+      turn(0.7 * turnAway);
+    } else {
+      const turnSpeed = clamp(ballAngle / 35, -1, 1) * 0.7;
+      turn(turnSpeed);
+    }
     
-    // Add small forward motion if ball is far
-    if (ballDist > 70) {
+    // Add small forward motion if ball is far and not aligned with own goal
+    if (ballDist > 70 && !alignedWithOwnGoal) {
       const fwd = 0.15;
       motor1 += fwd; motor2 += fwd; motor3 += fwd; motor4 += fwd;
     }
@@ -169,6 +206,20 @@ function strategy(worldState) {
   
   // --- APPROACH: Facing ball, drive toward it ---
   if (ballDist > 25) {
+    // Don't approach if we're aligned with own goal - reposition instead
+    if (alignedWithOwnGoal) {
+      const turnAway = ownGoalAngle > 0 ? -1 : 1;
+      const backSpeed = -0.5;
+      const turnSpeed = 0.6 * turnAway;
+      
+      motor1 = backSpeed - turnSpeed;
+      motor4 = backSpeed - turnSpeed;
+      motor2 = backSpeed + turnSpeed;
+      motor3 = backSpeed + turnSpeed;
+      
+      return { motor1, motor2, motor3, motor4, kick };
+    }
+    
     const speed = clamp(0.5 + ballDist / 200, 0.5, 0.85);
     const steer = clamp(ballAngle / 50, -0.2, 0.2);
     
@@ -182,7 +233,8 @@ function strategy(worldState) {
   
   // --- CLOSE TO BALL: Fine-tune alignment ---
   // If goal is visible and off to the side, try to align robot-ball-goal
-  if (goalVisible && Math_abs(goalAngle) > 20 && ballDist < 30) {
+  // BUT: Never align with our own goal!
+  if (goalVisible && Math_abs(goalAngle) > 20 && ballDist < 30 && !alignedWithOwnGoal) {
     // We want to position so that ball is between us and goal
     // Turn toward the goal while backing up slightly to adjust position
     const turnSpeed = clamp(goalAngle / 40, -1, 1) * 0.5;
@@ -198,6 +250,21 @@ function strategy(worldState) {
   
   // --- PUSH AND KICK ---
   // We're close to ball and roughly aligned with goal (or goal not visible)
+  // CRITICAL: Never push/kick if aligned with own goal!
+  if (alignedWithOwnGoal && ballDist < 30) {
+    // Turn away from own goal and back up
+    const turnAway = ownGoalAngle > 0 ? -1 : 1;
+    const backSpeed = -0.6;
+    const turnSpeed = 0.7 * turnAway;
+    
+    motor1 = backSpeed - turnSpeed;
+    motor4 = backSpeed - turnSpeed;
+    motor2 = backSpeed + turnSpeed;
+    motor3 = backSpeed + turnSpeed;
+    
+    return { motor1, motor2, motor3, motor4, kick };
+  }
+  
   const goalBias = goalVisible ? clamp(goalAngle / 60, -0.15, 0.15) : 0;
   const pushSpeed = 0.9;
   
@@ -206,9 +273,15 @@ function strategy(worldState) {
   motor2 = pushSpeed + goalBias;
   motor3 = pushSpeed + goalBias;
   
-  // Kick when aligned and close
-  if (ballDist < 20 && Math_abs(ballAngle) < 8) {
-    kick = true;
+  // Kick when aligned with TARGET goal and close, but NEVER when aligned with own goal
+  if (ballDist < 20 && Math_abs(ballAngle) < 8 && !alignedWithOwnGoal) {
+    // Double-check: make sure target goal is in front, not own goal
+    if (goalVisible && Math_abs(goalAngle) < 45) {
+      kick = true;
+    } else if (!ownGoalVisible || Math_abs(ownGoalAngle) > 45) {
+      // Safe to kick if own goal is not visible or far to the side
+      kick = true;
+    }
   }
   
   return { motor1, motor2, motor3, motor4, kick };
