@@ -57,8 +57,9 @@ export const ROBOT = {
   DIAMETER: 22,            // 22 cm (220 mm) max diameter
   RADIUS: 11,              // 11 cm radius
   HEIGHT: 22,              // 22 cm (220 mm) max height
-  NOTCH_ANGLE: 50,         // degrees for pac-man notch (kicker area)
-  NOTCH_DEPTH: 4,          // cm depth of kicker notch
+  NOTCH_ANGLE: 25,         // degrees - small kicker notch opening
+  NOTCH_DEPTH: 4,          // cm depth of kicker notch (4cm half-circle divet)
+  NOTCH_RADIUS: 2,         // cm radius of the half-circle kicker divet
   MASS: 2.5,               // kg (typical weight ~2-3kg)
   
   // Kicker

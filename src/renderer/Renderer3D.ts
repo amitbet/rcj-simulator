@@ -288,9 +288,30 @@ export class Renderer3D {
 
   createRobot(id: string, team: Team, role: RobotRole): void {
     const robot = new THREE.Group();
+    const notchAngle = (ROBOT.NOTCH_ANGLE * Math.PI) / 180;
+    const bodyHeight = ROBOT.HEIGHT * 0.6;
 
-    // Main body (pac-man shape)
-    const bodyGeom = this.createPacManGeometry(ROBOT.RADIUS, ROBOT.HEIGHT * 0.6, ROBOT.NOTCH_ANGLE);
+    // Main body - create pac-man shaped geometry using ExtrudeGeometry
+    const shape = new THREE.Shape();
+    const radius = ROBOT.RADIUS;
+    
+    // Draw pac-man shape (circle with wedge notch at front/+X direction)
+    shape.moveTo(0, 0);
+    // Arc from bottom edge of notch, around the back, to top edge of notch
+    const startAngle = notchAngle / 2;
+    const endAngle = 2 * Math.PI - notchAngle / 2;
+    const segments = 32;
+    for (let i = 0; i <= segments; i++) {
+      const angle = startAngle + (endAngle - startAngle) * (i / segments);
+      shape.lineTo(radius * Math.cos(angle), radius * Math.sin(angle));
+    }
+    shape.lineTo(0, 0);
+
+    const extrudeSettings = {
+      depth: bodyHeight,
+      bevelEnabled: false,
+    };
+    const bodyGeom = new THREE.ExtrudeGeometry(shape, extrudeSettings);
     const bodyMat = new THREE.MeshStandardMaterial({
       color: team === 'blue' ? 0x2196F3 : 0xFFC107,
       roughness: 0.4,
@@ -298,29 +319,47 @@ export class Renderer3D {
     });
     const body = new THREE.Mesh(bodyGeom, bodyMat);
     body.castShadow = true;
-    body.position.y = ROBOT.HEIGHT * 0.3;
+    // Rotate so Y is up and the notch faces +X
+    body.rotation.x = -Math.PI / 2;
+    body.position.y = bodyHeight;
     robot.add(body);
 
-    // Top plate
+    // Kicker plate inside the notch (dark triangular area visible from front)
+    const kickerShape = new THREE.Shape();
+    kickerShape.moveTo(0, 0);
+    kickerShape.lineTo(radius * 0.7, 0);
+    kickerShape.lineTo(radius * Math.cos(-notchAngle / 2), radius * Math.sin(-notchAngle / 2));
+    kickerShape.lineTo(0, 0);
+    kickerShape.lineTo(radius * Math.cos(notchAngle / 2), radius * Math.sin(notchAngle / 2));
+    kickerShape.lineTo(radius * 0.7, 0);
+    
+    const kickerGeom = new THREE.ExtrudeGeometry(kickerShape, { depth: bodyHeight * 0.9, bevelEnabled: false });
+    const kickerMat = new THREE.MeshStandardMaterial({ color: 0x333333, roughness: 0.8 });
+    const kicker = new THREE.Mesh(kickerGeom, kickerMat);
+    kicker.rotation.x = -Math.PI / 2;
+    kicker.position.y = bodyHeight * 0.95;
+    robot.add(kicker);
+
+    // Top plate (darker accent)
     const topGeom = new THREE.CylinderGeometry(ROBOT.RADIUS - 1, ROBOT.RADIUS - 1, 2, 32);
     const topMat = new THREE.MeshStandardMaterial({
       color: team === 'blue' ? 0x1565C0 : 0xF57C00,
       roughness: 0.3,
     });
     const top = new THREE.Mesh(topGeom, topMat);
-    top.position.y = ROBOT.HEIGHT * 0.6 + 1;
+    top.position.y = bodyHeight + 1;
     robot.add(top);
 
-    // Role indicator (text would require font loading, use simple marker)
-    const markerGeom = new THREE.SphereGeometry(2, 16, 16);
+    // Role indicator (colored sphere on top: red=attacker, green=defender)
+    const markerGeom = new THREE.SphereGeometry(1.5, 16, 16);
     const markerMat = new THREE.MeshBasicMaterial({
       color: role === 'attacker' ? 0xff4444 : 0x44ff44,
     });
     const marker = new THREE.Mesh(markerGeom, markerMat);
-    marker.position.y = ROBOT.HEIGHT * 0.6 + 4;
+    marker.position.y = bodyHeight + 3;
     robot.add(marker);
 
-    // Wheels (4 omni wheels)
+    // Wheels (4 omni wheels at 45 degree angles)
     const wheelGeom = new THREE.CylinderGeometry(3, 3, 2, 16);
     const wheelMat = new THREE.MeshStandardMaterial({ color: 0x333333, roughness: 0.8 });
     const wheelAngles = [Math.PI / 4, 3 * Math.PI / 4, 5 * Math.PI / 4, 7 * Math.PI / 4];
@@ -337,46 +376,8 @@ export class Renderer3D {
       robot.add(wheel);
     }
 
-    // Kicker (in the notch)
-    const kickerGeom = new THREE.BoxGeometry(ROBOT.NOTCH_DEPTH, 4, 8);
-    const kickerMat = new THREE.MeshStandardMaterial({ color: 0x666666 });
-    const kicker = new THREE.Mesh(kickerGeom, kickerMat);
-    kicker.position.set(ROBOT.RADIUS - ROBOT.NOTCH_DEPTH / 2, 4, 0);
-    robot.add(kicker);
-
     this.robots.set(id, robot);
     this.scene.add(robot);
-  }
-
-  private createPacManGeometry(radius: number, height: number, notchAngle: number): THREE.BufferGeometry {
-    const shape = new THREE.Shape();
-    const notchRad = (notchAngle * Math.PI) / 180;
-    
-    // Start at center
-    shape.moveTo(0, 0);
-    
-    // Arc around, skipping notch
-    const segments = 32;
-    for (let i = 0; i <= segments; i++) {
-      const angle = (notchRad / 2) + (i / segments) * (2 * Math.PI - notchRad);
-      shape.lineTo(radius * Math.cos(angle), radius * Math.sin(angle));
-    }
-    
-    shape.lineTo(0, 0);
-
-    const extrudeSettings = {
-      depth: height,
-      bevelEnabled: true,
-      bevelThickness: 1,
-      bevelSize: 1,
-      bevelSegments: 3,
-    };
-
-    const geometry = new THREE.ExtrudeGeometry(shape, extrudeSettings);
-    geometry.rotateX(-Math.PI / 2);
-    geometry.translate(0, height / 2, 0);
-
-    return geometry;
   }
 
   removeRobot(id: string): void {

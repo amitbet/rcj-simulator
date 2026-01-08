@@ -300,11 +300,11 @@ export class Renderer2D {
     const radius = ROBOT.RADIUS;
     const notchAngle = (ROBOT.NOTCH_ANGLE * Math.PI) / 180;
 
-    // Robot body (pac-man shape)
+    // Robot body (pac-man shape with kicker notch)
     const teamColor = team === 'blue' ? COLORS.TEAM_BLUE : COLORS.TEAM_YELLOW;
     const lightColor = team === 'blue' ? COLORS.TEAM_BLUE_LIGHT : COLORS.TEAM_YELLOW_LIGHT;
     
-    // Gradient for 3D effect - validate radius is finite
+    // Gradient for 3D effect
     if (isFinite(radius) && radius > 0) {
       try {
         const gradient = ctx.createRadialGradient(0, 0, 0, 0, 0, radius);
@@ -312,13 +312,13 @@ export class Renderer2D {
         gradient.addColorStop(1, teamColor);
         ctx.fillStyle = gradient;
       } catch (e) {
-        // Fallback to solid color if gradient fails
-        console.warn(`[drawRobot] Gradient creation failed, using solid color:`, e);
         ctx.fillStyle = teamColor;
       }
     } else {
       ctx.fillStyle = teamColor;
     }
+    
+    // Draw pac-man shape (circle with wedge cut out at front)
     ctx.beginPath();
     ctx.moveTo(0, 0);
     ctx.arc(0, 0, radius, notchAngle / 2, 2 * Math.PI - notchAngle / 2);
@@ -330,7 +330,7 @@ export class Renderer2D {
     ctx.lineWidth = 1.5;
     ctx.stroke();
 
-    // Kicker area (notch)
+    // Kicker area (dark triangular notch)
     ctx.fillStyle = '#333333';
     ctx.beginPath();
     ctx.moveTo(0, 0);
