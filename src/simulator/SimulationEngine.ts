@@ -55,6 +55,10 @@ export class SimulationEngine {
   private readonly BALL_STUCK_THRESHOLD_MS = 10000; // 10 seconds without significant movement
   private readonly BALL_MOVEMENT_THRESHOLD = 5; // cm - ball must move at least this much
 
+  // Robot strategy states (for display)
+  private robotStates: Map<string, string> = new Map(); // robotId -> current state
+  private robotTargets: Map<string, string> = new Map(); // robotId -> current target
+
   // Callbacks
   private onStateUpdate: ((state: SimulationState) => void) | null = null;
   private onGameEvent: ((event: string, data?: any) => void) | null = null;
@@ -246,6 +250,9 @@ export class SimulationEngine {
     // Immediately move robot outside goal area
     this.physics.moveRobotOutsideGoalArea(robotId, goalArea);
     
+    // Reset state machines when robots are artificially moved
+    this.resetStrategyStates();
+    
     // Log for debugging
     console.log(`[handleRobotOutOfBounds] Robot ${robotId} moved outside ${goalArea} goal area`);
   }
@@ -268,6 +275,9 @@ export class SimulationEngine {
     // Push robots away from the ball (minimum 20cm distance per RCJ rules)
     const MIN_ROBOT_DISTANCE = 20;
     this.physics.pushRobotsAwayFrom(neutralSpot.x, neutralSpot.y, MIN_ROBOT_DISTANCE + ROBOT.RADIUS);
+    
+    // Reset state machines when robots are artificially moved
+    this.resetStrategyStates();
     
     this.onGameEvent?.('out_of_bounds', { side, neutralSpot });
   }
@@ -295,6 +305,19 @@ export class SimulationEngine {
       const pos = this.getStartingPosition(robot.team, robot.role);
       this.physics.setRobotPosition(id, pos.x, pos.y, pos.angle);
     }
+    
+    // Reset state machines when robots are artificially moved
+    this.resetStrategyStates();
+  }
+  
+  // Reset strategy state machines (called when robots are artificially moved)
+  private resetStrategyStates(): void {
+    // Clear robot strategy states (for display)
+    this.robotStates.clear();
+    this.robotTargets.clear();
+    
+    // Reload strategies to reset their state machines (like power-on reset)
+    this.loadStrategies();
   }
 
   // Get starting position for a robot
@@ -405,7 +428,17 @@ export class SimulationEngine {
       // }
 
       // Execute strategy
-      const action = this.strategyExecutor.executeStrategy(id, worldState);
+      const { action, state, target } = this.strategyExecutor.executeStrategy(id, worldState);
+      
+      // Store state and target for display
+      if (state) {
+        this.robotStates.set(id, state);
+        worldState.state = state;
+      }
+      if (target) {
+        this.robotTargets.set(id, target);
+        worldState.target = target;
+      }
       
       // Apply action to physics
       this.physics.applyAction(id, action);
@@ -542,7 +575,8 @@ export class SimulationEngine {
 
   // Set simulation speed
   setSpeed(multiplier: number): void {
-    this.speedMultiplier = Math.max(0.1, Math.min(4, multiplier));
+    // Allow speeds from 0.05x (very slow) to 4x (fast)
+    this.speedMultiplier = Math.max(0.05, Math.min(4, multiplier));
   }
 
   // Check for line crossings and apply penalties (only when robot CENTER crosses a line)
@@ -700,6 +734,9 @@ export class SimulationEngine {
     this.ballStuckTime = 0;
     this.ballLastPosition = null;
     
+    // Reset state machines when robots are artificially moved
+    this.resetStrategyStates();
+    
     // If paused, resume to kickoff
     if (this.gameState.phase === GamePhase.Playing || this.gameState.phase === GamePhase.Paused) {
       this.gameState.phase = GamePhase.Kickoff;
@@ -783,6 +820,10 @@ export class SimulationEngine {
   // Set robot position (for drag and drop)
   setRobotPosition(id: string, x: number, y: number, angle?: number): void {
     this.physics.setRobotPosition(id, x, y, angle);
+    
+    // Reset state machines when robots are artificially moved
+    this.resetStrategyStates();
+    
     this.onStateUpdate?.(this.getSimulationState());
   }
 
@@ -798,6 +839,37 @@ export class SimulationEngine {
 
   setOnGameEvent(callback: (event: string, data?: any) => void): void {
     this.onGameEvent = callback;
+  }
+
+  // Get world states for all active robots
+  getWorldStates(): Map<string, WorldState> {
+    const worldStates = new Map<string, WorldState>();
+    const physicsState = this.physics.getState();
+    const robots = this.physics.getRobots();
+
+    for (const [id, robot] of robots) {
+      const worldState = this.observationSystem.calculateWorldState(
+        id,
+        physicsState,
+        this.gameState.time_elapsed_ms,
+        0.016, // Approximate delta for display
+        robot.team === 'blue'
+      );
+      
+      // Include stored robot state and target if available
+      const storedState = this.robotStates.get(id);
+      if (storedState) {
+        worldState.state = storedState;
+      }
+      const storedTarget = this.robotTargets.get(id);
+      if (storedTarget) {
+        worldState.target = storedTarget;
+      }
+      
+      worldStates.set(id, worldState);
+    }
+
+    return worldStates;
   }
 
   // Get physics engine (for rendering)

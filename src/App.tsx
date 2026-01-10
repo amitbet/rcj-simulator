@@ -10,13 +10,22 @@ import { GameMode, SimulationState, ViewMode, GamePhase } from './types';
 import { GameModeSelector } from './components/GameModeSelector';
 import { ControlPanel } from './components/ControlPanel';
 import { ScoreBoard } from './components/ScoreBoard';
-import { StrategyEditor } from './components/StrategyEditor';
+import { WorldView } from './components/WorldView';
 
-// Default strategies
-import attackerStrategy from './strategies/attacker.js?raw';
-import defenderStrategy from './strategies/defender.js?raw';
-import opponent1Strategy from './strategies/opponent1.js?raw';
-import opponent2Strategy from './strategies/opponent2.js?raw';
+// Strategy file paths - using dynamic imports
+// These will be updated by Vite HMR automatically
+import attackerStrategyRaw from './strategies/attacker.js?raw';
+import defenderStrategyRaw from './strategies/defender.js?raw';
+
+// Function to get current strategy content (will reflect HMR updates)
+// Both teams use the same strategy files (attacker.js and defender.js)
+// The strategies determine which team they're on using the we_are_blue variable
+const getCurrentStrategyContent = () => ({
+  blue_attacker: attackerStrategyRaw,
+  blue_defender: defenderStrategyRaw,
+  yellow_attacker: attackerStrategyRaw,
+  yellow_defender: defenderStrategyRaw,
+});
 
 const App: React.FC = () => {
   // State
@@ -28,14 +37,10 @@ const App: React.FC = () => {
   const [isDragging, setIsDragging] = useState(false);
   const [dragTarget, setDragTarget] = useState<{ type: 'ball' | 'robot'; id?: string } | null>(null);
 
-  // Strategies state
-  const [strategies, setStrategies] = useState({
-    blue_attacker: attackerStrategy,
-    blue_defender: defenderStrategy,
-    yellow_attacker: opponent1Strategy,
-    yellow_defender: opponent2Strategy,
-  });
-  const [activeEditorTab, setActiveEditorTab] = useState('blue_attacker');
+  // Strategies state with hashes for change detection
+  const [strategies, setStrategies] = useState<Record<string, { code: string; hash: string; loadTime: number }>>({});
+  const [worldStates, setWorldStates] = useState<Map<string, any>>(new Map());
+  const [activeTab, setActiveTab] = useState('blue_attacker');
 
   // Refs
   const simulationRef = useRef<SimulationEngine | null>(null);
@@ -44,6 +49,140 @@ const App: React.FC = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const container3DRef = useRef<HTMLDivElement>(null);
   const animationRef = useRef<number>(0);
+
+  // Simple hash function for strategy code
+  const hashString = (str: string): string => {
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+      const char = str.charCodeAt(i);
+      hash = ((hash << 5) - hash) + char;
+      hash = hash & hash; // Convert to 32-bit integer
+    }
+    return hash.toString(36);
+  };
+
+  // Load strategy file content and hash (without timestamp)
+  const loadStrategyFileContent = (robotId: string): { code: string; hash: string } => {
+    const content = getCurrentStrategyContent();
+    const code = content[robotId as keyof typeof content];
+    if (!code) {
+      throw new Error(`Unknown robot ID: ${robotId}`);
+    }
+    const hash = hashString(code);
+    return { code, hash };
+  };
+
+  // Load all strategies (initial load from local files) - with timestamps
+  const loadAllStrategies = useCallback(() => {
+    const loaded: Record<string, { code: string; hash: string; loadTime: number }> = {};
+    const baseTime = Date.now();
+    
+    try {
+      // Load each strategy with offsets to ensure unique timestamps (100ms apart)
+      const blueAttacker = loadStrategyFileContent('blue_attacker');
+      const blueDefender = loadStrategyFileContent('blue_defender');
+      const yellowAttacker = loadStrategyFileContent('yellow_attacker');
+      const yellowDefender = loadStrategyFileContent('yellow_defender');
+      
+      loaded.blue_attacker = { ...blueAttacker, loadTime: baseTime };
+      loaded.blue_defender = { ...blueDefender, loadTime: baseTime + 100 };
+      loaded.yellow_attacker = { ...yellowAttacker, loadTime: baseTime + 200 };
+      loaded.yellow_defender = { ...yellowDefender, loadTime: baseTime + 300 };
+      
+      return loaded;
+    } catch (error) {
+      console.error('Failed to load strategies:', error);
+      return null;
+    }
+  }, []);
+
+  // Load all strategies without timestamps (for change detection)
+  const loadAllStrategiesForCheck = useCallback(() => {
+    const loaded: Record<string, { code: string; hash: string }> = {};
+    
+    try {
+      loaded.blue_attacker = loadStrategyFileContent('blue_attacker');
+      loaded.blue_defender = loadStrategyFileContent('blue_defender');
+      loaded.yellow_attacker = loadStrategyFileContent('yellow_attacker');
+      loaded.yellow_defender = loadStrategyFileContent('yellow_defender');
+      
+      return loaded;
+    } catch (error) {
+      console.error('Failed to load strategies for check:', error);
+      return null;
+    }
+  }, []);
+
+
+  // Initial strategy load
+  useEffect(() => {
+    const initial = loadAllStrategies();
+    if (initial) {
+      setStrategies(initial);
+    }
+  }, []);
+
+  // Watch for strategy file changes (checking every 5 seconds)
+  useEffect(() => {
+    if (Object.keys(strategies).length === 0) return; // Wait for initial load
+
+    let watchInterval: number | null = null;
+
+    const watchStrategies = () => {
+      // Load all strategy files (code and hash only, no timestamps)
+      const localStrategies = loadAllStrategiesForCheck();
+      if (!localStrategies) return;
+
+      // Create a new object, preserving loadTime and hash for unchanged strategies
+      const updated: Record<string, { code: string; hash: string; loadTime: number }> = {};
+      let hasChanges = false;
+
+      // First, copy all existing strategies with their original loadTime and hash
+      // This ensures unchanged strategies keep their old timestamps
+      for (const [robotId, strategy] of Object.entries(strategies)) {
+        updated[robotId] = { ...strategy }; // Preserve original loadTime and hash
+      }
+
+      // Check each strategy file for changes
+      for (const [robotId, localStrategy] of Object.entries(localStrategies)) {
+        const currentStrategy = strategies[robotId];
+        
+        // Only update if hash actually changed
+        if (currentStrategy && currentStrategy.hash !== localStrategy.hash) {
+          console.log(`Strategy changed for ${robotId}: ${currentStrategy.hash} -> ${localStrategy.hash}, reloading...`);
+          hasChanges = true;
+          
+          // Update strategy in simulation
+          if (simulationRef.current) {
+            simulationRef.current.updateStrategy(robotId, localStrategy.code);
+          }
+          
+          // Update with new load time (only for this specific changed strategy)
+          updated[robotId] = {
+            code: localStrategy.code,
+            hash: localStrategy.hash,
+            loadTime: Date.now(),
+          };
+        }
+        // If hash unchanged, keep existing strategy with old timestamp (already copied above)
+      }
+
+      if (hasChanges) {
+        setStrategies(updated);
+      } else {
+        console.log('No strategy changes detected');
+      }
+    };
+
+    // Watch for changes every 5 seconds
+    watchInterval = window.setInterval(watchStrategies, 5000);
+
+    return () => {
+      if (watchInterval !== null) {
+        clearInterval(watchInterval);
+      }
+    };
+  }, [loadAllStrategiesForCheck, strategies]);
 
   // Initialize simulation
   const initializeSimulation = useCallback((mode: GameMode) => {
@@ -57,22 +196,27 @@ const App: React.FC = () => {
     
     const config: SimulationConfig = {
       mode,
-      blueAttackerStrategy: (mode === GameMode.SingleBotAttacker || mode === GameMode.SingleTeam || mode === GameMode.TwoTeam) ? strategies.blue_attacker : undefined,
-      blueDefenderStrategy: (mode === GameMode.SingleBotDefender || mode === GameMode.SingleTeam || mode === GameMode.TwoTeam) ? strategies.blue_defender : undefined,
-      yellowAttackerStrategy: mode === GameMode.TwoTeam ? strategies.yellow_attacker : undefined,
-      yellowDefenderStrategy: mode === GameMode.TwoTeam ? strategies.yellow_defender : undefined,
+      blueAttackerStrategy: (mode === GameMode.SingleBotAttacker || mode === GameMode.SingleTeam || mode === GameMode.TwoTeam) ? strategies.blue_attacker?.code : undefined,
+      blueDefenderStrategy: (mode === GameMode.SingleBotDefender || mode === GameMode.SingleTeam || mode === GameMode.TwoTeam) ? strategies.blue_defender?.code : undefined,
+      yellowAttackerStrategy: mode === GameMode.TwoTeam ? strategies.yellow_attacker?.code : undefined,
+      yellowDefenderStrategy: mode === GameMode.TwoTeam ? strategies.yellow_defender?.code : undefined,
     };
 
     simulation.initialize(config);
     simulation.setOnStateUpdate((state) => {
       setSimulationState(state);
+      // Update world states
+      const worldStates = simulation.getWorldStates();
+      setWorldStates(worldStates);
     });
     simulation.setOnGameEvent((event, data) => {
       console.log('Game event:', event, data);
     });
 
     simulationRef.current = simulation;
-    setSimulationState(simulation.getSimulationState());
+    const initialState = simulation.getSimulationState();
+    setSimulationState(initialState);
+    setWorldStates(simulation.getWorldStates());
   }, [strategies]);
 
   // Handle mode selection - auto-start the simulation
@@ -176,12 +320,9 @@ const App: React.FC = () => {
     }
   };
 
-  // Strategy update handler
-  const handleStrategyChange = (robotId: string, code: string) => {
-    setStrategies((prev) => ({ ...prev, [robotId]: code }));
-    if (simulationRef.current) {
-      simulationRef.current.updateStrategy(robotId, code);
-    }
+  // Tab change handler
+  const handleTabChange = (tab: string) => {
+    setActiveTab(tab);
   };
 
   // Drag and drop handlers
@@ -346,12 +487,12 @@ const App: React.FC = () => {
                 onNewGame={() => setShowModeSelector(true)}
               />
 
-              <StrategyEditor
-                strategies={strategies}
-                activeTab={activeEditorTab}
-                onTabChange={setActiveEditorTab}
-                onStrategyChange={handleStrategyChange}
+              <WorldView
+                worldStates={worldStates}
                 gameMode={gameMode}
+                activeTab={activeTab}
+                onTabChange={handleTabChange}
+                strategies={strategies}
               />
             </>
           )}

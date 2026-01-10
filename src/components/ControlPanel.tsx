@@ -48,13 +48,13 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
         <input
           type="range"
           className="speed-slider"
-          min="0.25"
+          min="0.1"
           max="4"
-          step="0.25"
+          step="0.1"
           value={speed}
           onChange={(e) => onSpeedChange(parseFloat(e.target.value))}
         />
-        <span className="speed-value">{speed}x</span>
+        <span className="speed-value">{speed.toFixed(1)}x</span>
       </div>
 
       <div style={{ marginTop: '16px', display: 'flex', flexDirection: 'column', gap: '8px' }}>

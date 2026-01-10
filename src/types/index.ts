@@ -51,6 +51,10 @@ export interface WorldState {
   // Game-side info
   we_are_blue: boolean;    // which goal is ours
   kickoff_us: boolean;
+  
+  // Strategy state (optional, set by strategy)
+  state?: string;           // current state machine state
+  target?: string;          // current target (e.g., "ball", "blue goal", "yellow goal")
 }
 
 // Action output from strategy
@@ -191,6 +195,7 @@ export function createDefaultWorldState(): WorldState {
     stuck_confidence: 0,
     we_are_blue: true,
     kickoff_us: false,
+    state: undefined,
   };
 }
 

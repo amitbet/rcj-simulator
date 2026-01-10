@@ -13,6 +13,9 @@ export class StrategyExecutor {
   // Load strategy code for a robot
   loadStrategy(robotId: string, code: string): boolean {
     try {
+      // Store code for state extraction
+      this.strategyCodeMap.set(robotId, code);
+      
       // Create a sandboxed function from the code
       const strategyFunc = this.createSandboxedStrategy(code);
       this.strategies.set(robotId, strategyFunc);
@@ -29,6 +32,7 @@ export class StrategyExecutor {
   // Create a sandboxed strategy function
   private createSandboxedStrategy(code: string): Function {
     // Wrap the code in a function that returns the strategy function
+    // We'll also capture the state variable
     const wrappedCode = `
       "use strict";
       
@@ -37,6 +41,7 @@ export class StrategyExecutor {
       const Math_sin = Math.sin;
       const Math_cos = Math.cos;
       const Math_atan2 = Math.atan2;
+      const Math_acos = Math.acos;
       const Math_sqrt = Math.sqrt;
       const Math_min = Math.min;
       const Math_max = Math.max;
@@ -59,9 +64,21 @@ export class StrategyExecutor {
       
       ${code}
       
-      // Return the strategy function
+      // Return the strategy function wrapped to capture state and target
       if (typeof strategy === 'function') {
-        return strategy;
+        const originalStrategy = strategy;
+        return function(worldState) {
+          const result = originalStrategy(worldState);
+          // Attach currentState to result if it exists
+          if (typeof currentState !== 'undefined') {
+            result._state = currentState;
+          }
+          // Attach currentTarget to result if it exists
+          if (typeof currentTarget !== 'undefined') {
+            result._target = currentTarget;
+          }
+          return result;
+        };
       } else {
         throw new Error('Strategy must define a function called "strategy"');
       }
@@ -73,26 +90,35 @@ export class StrategyExecutor {
   }
 
   // Execute strategy for a robot
-  executeStrategy(robotId: string, worldState: WorldState): Action {
+  executeStrategy(robotId: string, worldState: WorldState): { action: Action; state?: string; target?: string } {
     const strategyFunc = this.strategies.get(robotId);
     
     if (!strategyFunc) {
-      return createDefaultAction();
+      return { action: createDefaultAction() };
     }
 
     try {
       // Execute with timeout protection (simple version)
       const result = strategyFunc(worldState);
       
-      // Validate result
-      return this.validateAction(result);
+      // Validate action
+      const action = this.validateAction(result);
+      
+      // Extract state and target from result if they were attached
+      const state = (result as any)._state;
+      const target = (result as any)._target;
+      
+      return { action, state, target };
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       this.errors.set(robotId, `Runtime error: ${errorMessage}`);
       console.error(`Strategy error for ${robotId}:`, errorMessage);
-      return createDefaultAction();
+      return { action: createDefaultAction() };
     }
   }
+  
+  // Store strategy code for potential future use
+  private strategyCodeMap: Map<string, string> = new Map();
 
   // Validate and sanitize action
   private validateAction(result: any): Action {

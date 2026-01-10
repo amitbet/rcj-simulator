@@ -8,9 +8,18 @@ import { FIELD, GOAL, ROBOT } from '../types/constants';
 
 export class ObservationSystem {
   // Camera/vision parameters
-  private readonly CAMERA_FOV = 90; // degrees field of view
+  // 360-degree camera (or 2 cameras covering full field of view)
+  private readonly CAMERA_FOV = 360; // degrees field of view - whole field is visible
   // Max detection distance should cover diagonal of field (sqrt(182^2 + 243^2) ≈ 303cm)
   private readonly MAX_DISTANCE = 350; // cm max detection distance
+
+  // Track previous sensor positions for path-based line crossing detection
+  private previousSensorPositions: Map<string, {
+    front: { x: number; y: number };
+    left: { x: number; y: number };
+    right: { x: number; y: number };
+    rear: { x: number; y: number };
+  }> = new Map();
 
   constructor() {}
 
@@ -56,10 +65,11 @@ export class ObservationSystem {
     const bumperRight = this.checkBumper(x, y, angle, -Math.PI / 2);
 
     // Check line sensors (detect white lines: field boundaries and goal area lines)
-    const lineFront = this.checkLineSensor(x, y, angle, 0);
-    const lineLeft = this.checkLineSensor(x, y, angle, Math.PI / 2);
-    const lineRight = this.checkLineSensor(x, y, angle, -Math.PI / 2);
-    const lineRear = this.checkLineSensor(x, y, angle, Math.PI);
+    // Use path-based detection to catch fast crossings
+    const lineFront = this.checkLineSensorWithPath(robotId, x, y, angle, 0, 'front');
+    const lineLeft = this.checkLineSensorWithPath(robotId, x, y, angle, Math.PI / 2, 'left');
+    const lineRight = this.checkLineSensorWithPath(robotId, x, y, angle, -Math.PI / 2, 'right');
+    const lineRear = this.checkLineSensorWithPath(robotId, x, y, angle, Math.PI, 'rear');
 
     // Check if stuck (very low speed despite motors running)
     const stuck = speed < 1 && deltaS > 0.1;
@@ -109,22 +119,22 @@ export class ObservationSystem {
     while (relativeAngle > 180) relativeAngle -= 360;
     while (relativeAngle < -180) relativeAngle += 360;
 
-    // Check if in field of view
-    const inFOV = Math.abs(relativeAngle) <= this.CAMERA_FOV / 2;
-    const visible = inFOV && distance <= this.MAX_DISTANCE;
+    // With 360-degree camera, everything is always in field of view
+    // Only distance matters for visibility
+    const visible = distance <= this.MAX_DISTANCE;
 
-    // Calculate confidence based on distance and angle
+    // Calculate confidence based on distance only (angle doesn't matter with 360 FOV)
     let confidence = 0;
     if (visible) {
       const distanceConfidence = 1 - (distance / this.MAX_DISTANCE);
-      const angleConfidence = 1 - (Math.abs(relativeAngle) / (this.CAMERA_FOV / 2));
-      confidence = distanceConfidence * angleConfidence;
+      confidence = distanceConfidence;
     }
 
     // Simulate pixel coordinates (assuming 320x240 camera)
+    // For 360 FOV, map angle to full width: -180 to +180 maps to 0 to 320
     const imageWidth = 320;
     const imageHeight = 240;
-    const cx = visible ? Math.round(imageWidth / 2 + (relativeAngle / (this.CAMERA_FOV / 2)) * (imageWidth / 2)) : 0;
+    const cx = visible ? Math.round((relativeAngle + 180) / 360 * imageWidth) : 0;
     const cy = visible ? Math.round(imageHeight / 2) : 0;
     
     // Simulate bounding box size (smaller when farther)
@@ -167,25 +177,195 @@ export class ObservationSystem {
            checkY < -outerHalfH + 5 || checkY > outerHalfH - 5;
   }
 
-  // Check line sensor - detects white lines (field boundaries and goal area lines)
-  // Line sensors are typically positioned at the front, sides, and rear of the robot
-  private checkLineSensor(
+  // Check line sensor with path-based detection to catch fast crossings
+  private checkLineSensorWithPath(
+    robotId: string,
     robotX: number,
     robotY: number,
     robotAngle: number,
-    sensorOffset: number // 0 = front, PI/2 = left, -PI/2 = right, PI = rear
+    sensorOffset: number,
+    sensorName: 'front' | 'left' | 'right' | 'rear'
   ): boolean {
     const sensorAngle = robotAngle + sensorOffset;
-    const sensorDistance = ROBOT.RADIUS + 1; // Line sensors are near robot edge
+    const sensorDistance = ROBOT.RADIUS; // Line sensors are exactly at robot edge
     
-    const sensorX = robotX + Math.cos(sensorAngle) * sensorDistance;
-    const sensorY = robotY + Math.sin(sensorAngle) * sensorDistance;
+    const currentSensorX = robotX + Math.cos(sensorAngle) * sensorDistance;
+    const currentSensorY = robotY + Math.sin(sensorAngle) * sensorDistance;
 
+    // Get previous sensor position
+    const prevPositions = this.previousSensorPositions.get(robotId);
+    const prevSensorX = prevPositions?.[sensorName]?.x;
+    const prevSensorY = prevPositions?.[sensorName]?.y;
+
+    // Check current position (point-based detection)
+    const currentDetected = this.checkLineAtPoint(currentSensorX, currentSensorY);
+
+    // If we have previous position, check if path crossed a line
+    if (prevSensorX !== undefined && prevSensorY !== undefined) {
+      const pathCrossed = this.checkLinePathCrossing(prevSensorX, prevSensorY, currentSensorX, currentSensorY);
+      if (pathCrossed) {
+        // Update stored position and return true
+        this.updateSensorPosition(robotId, sensorName, currentSensorX, currentSensorY);
+        return true;
+      }
+    }
+
+    // Update stored position
+    this.updateSensorPosition(robotId, sensorName, currentSensorX, currentSensorY);
+
+    return currentDetected;
+  }
+
+  // Update stored sensor position
+  private updateSensorPosition(
+    robotId: string,
+    sensorName: 'front' | 'left' | 'right' | 'rear',
+    x: number,
+    y: number
+  ): void {
+    if (!this.previousSensorPositions.has(robotId)) {
+      this.previousSensorPositions.set(robotId, {
+        front: { x: 0, y: 0 },
+        left: { x: 0, y: 0 },
+        right: { x: 0, y: 0 },
+        rear: { x: 0, y: 0 },
+      });
+    }
+    const positions = this.previousSensorPositions.get(robotId)!;
+    positions[sensorName] = { x, y };
+  }
+
+  // Check if a line segment crosses any field line
+  private checkLinePathCrossing(
+    x1: number, y1: number,
+    x2: number, y2: number
+  ): boolean {
     const halfW = FIELD.WIDTH / 2;
     const halfH = FIELD.HEIGHT / 2;
     const goalAreaW = FIELD.PENALTY_AREA_WIDTH / 2;
     const goalAreaD = FIELD.PENALTY_AREA_DEPTH;
-    const lineTolerance = FIELD.LINE_WIDTH / 2 + 1; // Detect within line width + small margin
+    const lineTolerance = FIELD.LINE_WIDTH / 2;
+
+    // Check field boundary lines
+    // Top boundary (y = -halfH) - check left and right segments separately (goal opening in middle)
+    // Left segment: from -halfW to -GOAL.WIDTH/2
+    if (this.segmentCrossesLine(x1, y1, x2, y2, -halfH, -halfH, -halfW, -GOAL.WIDTH / 2, 'horizontal')) {
+      return true;
+    }
+    // Right segment: from GOAL.WIDTH/2 to halfW
+    if (this.segmentCrossesLine(x1, y1, x2, y2, -halfH, -halfH, GOAL.WIDTH / 2, halfW, 'horizontal')) {
+      return true;
+    }
+    // Bottom boundary (y = halfH) - check left and right segments separately
+    // Left segment: from -halfW to -GOAL.WIDTH/2
+    if (this.segmentCrossesLine(x1, y1, x2, y2, halfH, halfH, -halfW, -GOAL.WIDTH / 2, 'horizontal')) {
+      return true;
+    }
+    // Right segment: from GOAL.WIDTH/2 to halfW
+    if (this.segmentCrossesLine(x1, y1, x2, y2, halfH, halfH, GOAL.WIDTH / 2, halfW, 'horizontal')) {
+      return true;
+    }
+    // Left boundary (x = -halfW)
+    if (this.segmentCrossesLine(x1, y1, x2, y2, -halfW, -halfW, -halfH, halfH, 'vertical')) {
+      return true;
+    }
+    // Right boundary (x = halfW)
+    if (this.segmentCrossesLine(x1, y1, x2, y2, halfW, halfW, -halfH, halfH, 'vertical')) {
+      return true;
+    }
+
+    // Check goal area lines
+    // Blue goal area front line (y = -halfH + goalAreaD)
+    if (this.segmentCrossesLine(x1, y1, x2, y2, -halfH + goalAreaD, -halfH + goalAreaD, -goalAreaW, goalAreaW, 'horizontal')) {
+      return true;
+    }
+    // Blue goal area left side (x = -goalAreaW)
+    if (this.segmentCrossesLine(x1, y1, x2, y2, -goalAreaW, -goalAreaW, -halfH, -halfH + goalAreaD, 'vertical')) {
+      return true;
+    }
+    // Blue goal area right side (x = goalAreaW)
+    if (this.segmentCrossesLine(x1, y1, x2, y2, goalAreaW, goalAreaW, -halfH, -halfH + goalAreaD, 'vertical')) {
+      return true;
+    }
+
+    // Yellow goal area front line (y = halfH - goalAreaD)
+    if (this.segmentCrossesLine(x1, y1, x2, y2, halfH - goalAreaD, halfH - goalAreaD, -goalAreaW, goalAreaW, 'horizontal')) {
+      return true;
+    }
+    // Yellow goal area left side (x = -goalAreaW)
+    if (this.segmentCrossesLine(x1, y1, x2, y2, -goalAreaW, -goalAreaW, halfH - goalAreaD, halfH, 'vertical')) {
+      return true;
+    }
+    // Yellow goal area right side (x = goalAreaW)
+    if (this.segmentCrossesLine(x1, y1, x2, y2, goalAreaW, goalAreaW, halfH - goalAreaD, halfH, 'vertical')) {
+      return true;
+    }
+
+    return false;
+  }
+
+  // Check if a line segment crosses a horizontal or vertical line
+  private segmentCrossesLine(
+    segX1: number, segY1: number,
+    segX2: number, segY2: number,
+    lineX1: number, lineY1: number,
+    lineX2: number, lineY2: number,
+    orientation: 'horizontal' | 'vertical'
+  ): boolean {
+    if (orientation === 'horizontal') {
+      const lineY = lineY1; // Horizontal line has constant Y
+      const lineXMin = Math.min(lineX1, lineX2);
+      const lineXMax = Math.max(lineX1, lineX2);
+      
+      // Check if segment crosses the horizontal line
+      const segYMin = Math.min(segY1, segY2);
+      const segYMax = Math.max(segY1, segY2);
+      
+      if (segYMin <= lineY && segYMax >= lineY) {
+        // Segment crosses the line's Y coordinate
+        // Find intersection X
+        const t = (lineY - segY1) / (segY2 - segY1);
+        if (t >= 0 && t <= 1) {
+          const intersectX = segX1 + t * (segX2 - segX1);
+          // Check if intersection is within line segment bounds
+          if (intersectX >= lineXMin && intersectX <= lineXMax) {
+            return true;
+          }
+        }
+      }
+    } else {
+      const lineX = lineX1; // Vertical line has constant X
+      const lineYMin = Math.min(lineY1, lineY2);
+      const lineYMax = Math.max(lineY1, lineY2);
+      
+      // Check if segment crosses the vertical line
+      const segXMin = Math.min(segX1, segX2);
+      const segXMax = Math.max(segX1, segX2);
+      
+      if (segXMin <= lineX && segXMax >= lineX) {
+        // Segment crosses the line's X coordinate
+        // Find intersection Y
+        const t = (lineX - segX1) / (segX2 - segX1);
+        if (t >= 0 && t <= 1) {
+          const intersectY = segY1 + t * (segY2 - segY1);
+          // Check if intersection is within line segment bounds
+          if (intersectY >= lineYMin && intersectY <= lineYMax) {
+            return true;
+          }
+        }
+      }
+    }
+    
+    return false;
+  }
+
+  // Check if a point is over a line (original point-based detection)
+  private checkLineAtPoint(sensorX: number, sensorY: number): boolean {
+    const halfW = FIELD.WIDTH / 2;
+    const halfH = FIELD.HEIGHT / 2;
+    const goalAreaW = FIELD.PENALTY_AREA_WIDTH / 2;
+    const goalAreaD = FIELD.PENALTY_AREA_DEPTH;
+    const lineTolerance = FIELD.LINE_WIDTH / 2 + 0.5; // Detect when directly over line
 
     // Check field boundary lines (white lines marking field edges)
     // Top boundary (blue goal side)
