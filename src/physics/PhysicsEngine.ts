@@ -286,7 +286,7 @@ export class PhysicsEngine {
     const body = Bodies.circle(x, y, ROBOT.RADIUS, {
       restitution: 0.1, // Low restitution to avoid bouncing ball too hard
       friction: ROBOT_FRICTION,
-      frictionAir: 0.1,
+      frictionAir: 0.05, // Reduced air friction for omni wheels (was 0.1)
       mass: ROBOT.MASS,
       inertia: Infinity, // Prevent rotation affecting collision
       label: `robot_${id}`,
@@ -339,6 +339,7 @@ export class PhysicsEngine {
 
   // Apply action to a robot using position-based (kinematic) movement
   // This avoids physics instabilities from setVelocity interfering with collision resolution
+  // Robot has 4 omni wheels arranged at 45-degree angles
   applyAction(robotId: string, action: Action): void {
     const robot = this.robots.get(robotId);
     if (!robot) return;
@@ -349,26 +350,184 @@ export class PhysicsEngine {
 
     const { motor1, motor2, motor3, motor4 } = action;
     
-    // Left side motors (1=front-left, 4=back-left)
-    const leftSide = (motor1 + motor4) / 2;
-    // Right side motors (2=front-right, 3=back-right)
-    const rightSide = (motor2 + motor3) / 2;
+    // Omni wheel inverse kinematics (from Arduino patterns, verified in test_arduino_patterns.js):
+    // Forward kinematics: m1 = vx + vy + omega, m2 = -vx + vy + omega, m3 = vx - vy - omega, m4 = -vx - vy - omega
+    // Inverse kinematics (using all 4 motors for better accuracy):
+    //   vx = ((m1 - m2) + (m3 - m4)) / 4  (averaged from front and back pairs)
+    //   vy + omega = ((m1 + m2) - (m3 + m4)) / 4  (from all motors)
+    //   Note: vy and omega are coupled, can't be separated from motor values alone
     
-    // Forward = average of both sides
-    const forward = (leftSide + rightSide) / 2;
+    const vx_robot = ((motor1 - motor2) + (motor3 - motor4)) / 4;
+    const vy_plus_omega = ((motor1 + motor2) - (motor3 + motor4)) / 4;
     
-    // Rotation = difference between sides (right - left = turn right/clockwise)
-    const rotation = (rightSide - leftSide) / 2;
+    // #region agent log
+    if (Math.abs(motor1) > 0.1 || Math.abs(motor2) > 0.1 || Math.abs(motor3) > 0.1 || Math.abs(motor4) > 0.1) {
+      fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          location: 'PhysicsEngine.ts:362',
+          message: 'inverse kinematics',
+          data: {
+            robotId,
+            motors: [motor1.toFixed(2), motor2.toFixed(2), motor3.toFixed(2), motor4.toFixed(2)],
+            vx_robot: vx_robot.toFixed(3),
+            vy_plus_omega: vy_plus_omega.toFixed(3)
+          },
+          timestamp: Date.now(),
+          sessionId: 'debug-session',
+          runId: 'run1',
+          hypothesisId: 'A'
+        })
+      }).catch(() => {});
+    }
+    // #endregion
+    
+    // Heuristic to separate vy (strafe) from omega (rotation):
+    // NOTE: Strafe and rotation have IDENTICAL motor patterns: [+, +, -, -]
+    // The difference is in interpretation: strafe moves sideways, rotation spins in place
+    // We can't distinguish them from motor values alone, so we use a heuristic:
+    // - If vx is zero AND vy_plus_omega is significant, assume STRAFE (not rotation)
+    //   This is because strafe is more common in omni wheel usage
+    // - Pure rotation is detected when ALL motors have same sign (rare pattern)
+    // - Forward + turn: vx is significant AND vy_plus_omega is significant
+    
+    const vxAbs = Math.abs(vx_robot);
+    const vyOmegaAbs = Math.abs(vy_plus_omega);
+    const threshold = 0.03; // Lowered threshold to allow small vy values during diagonal movement
+    
+    // Check for pure rotation: ALL motors have same sign (all positive or all negative)
+    // This is different from [+, +, -, -] pattern
+    const allSameSign = (motor1 > 0 && motor2 > 0 && motor3 > 0 && motor4 > 0) ||
+                        (motor1 < 0 && motor2 < 0 && motor3 < 0 && motor4 < 0);
+    
+    let vy_robot = 0;
+    let omega = 0;
+    
+    // Check if motors suggest rotation vs strafe
+    // Rotation pattern: motor1 ≈ motor2, motor3 ≈ motor4, motor1 ≈ -motor3
+    // Strafe/Diagonal pattern: motor1 ≠ motor2 OR motor3 ≠ motor4
+    const motor1_equals_m2 = Math.abs(motor1 - motor2) < 0.1;
+    const motor3_equals_m4 = Math.abs(motor3 - motor4) < 0.1;
+    const motor1_opposite_m3 = Math.abs(motor1 + motor3) < 0.1;
+    const isRotationPattern = motor1_equals_m2 && motor3_equals_m4 && motor1_opposite_m3;
+    
+    if (allSameSign) {
+      // Pure rotation: all motors same sign (rare pattern, e.g., [1, 1, 1, 1])
+      omega = vy_plus_omega;
+    } else if (isRotationPattern && vxAbs < threshold) {
+      // Pure rotation pattern with no forward movement
+      omega = vy_plus_omega;
+      vy_robot = 0;
+    } else if (vxAbs > threshold && vyOmegaAbs > threshold) {
+      // Both vx and vy_plus_omega are significant
+      // Check if it's rotation pattern or diagonal movement
+      if (isRotationPattern) {
+        // Forward + rotation
+        omega = vy_plus_omega;
+        vy_robot = 0;
+      } else {
+        // Forward + strafe (diagonal movement)
+        vy_robot = vy_plus_omega;
+        omega = 0;
+      }
+    } else if (vxAbs > threshold) {
+      // Pure forward/backward (vy_robot = 0, omega = 0)
+      vy_robot = 0;
+      omega = 0;
+    } else if (vyOmegaAbs > threshold) {
+      // Pure strafe: vx is small, vy_plus_omega is significant
+      // Assume this is strafe, not rotation (strafe is more common)
+      vy_robot = vy_plus_omega;
+      omega = 0;
+    }
+    // Otherwise: no movement (vy_robot = 0, omega = 0)
+    
+    // #region agent log
+    if (Math.abs(vx_robot) > 0.1 || Math.abs(vy_plus_omega) > 0.1) {
+      fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          location: 'PhysicsEngine.ts:heuristic',
+          message: 'vy/omega separation',
+          data: {
+            robotId,
+            vx_robot: vx_robot.toFixed(3),
+            vy_plus_omega: vy_plus_omega.toFixed(3),
+            vxAbs: vxAbs.toFixed(3),
+            vyOmegaAbs: vyOmegaAbs.toFixed(3),
+            threshold,
+            allSameSign,
+            vy_robot: vy_robot.toFixed(3),
+            omega: omega.toFixed(3),
+            motors: [motor1.toFixed(2), motor2.toFixed(2), motor3.toFixed(2), motor4.toFixed(2)]
+          },
+          timestamp: Date.now(),
+          sessionId: 'debug-session',
+          runId: 'run1',
+          hypothesisId: 'C'
+        })
+      }).catch(() => {});
+    }
+    // #endregion
 
     // Calculate movement for this frame
     const dt = 0.016; // ~60 FPS timestep
     const maxSpeed = ROBOT.MAX_SPEED * dt; // cm per frame
     const maxAngular = (ROBOT.MAX_ANGULAR_SPEED * Math.PI / 180) * dt; // rad per frame
 
-    // Calculate new position
-    const moveX = forward * Math.cos(angle) * maxSpeed;
-    const moveY = forward * Math.sin(angle) * maxSpeed;
-    const newAngle = angle + rotation * maxAngular;
+    // Transform robot-relative velocity to world coordinates
+    // vx_robot is forward/backward, vy_robot is left/right
+    // Robot angle: 0 = facing up (Y+), positive = clockwise
+    // NOTE: Matter.js Y+ is DOWN, but our world has Y+ as UP (blue goal at top = negative Y)
+    // So we need to invert moveY to match the world coordinate system
+    const cosAngle = Math.cos(angle);
+    const sinAngle = Math.sin(angle);
+    // Forward/backward (vx) transforms with robot angle (affects Y)
+    // Left/right (vy) transforms perpendicular to robot angle (affects X)
+    // For strafe right (vy>0, vx=0, angle=0): moveX should be positive, moveY should be 0
+    // For forward (vx>0, vy=0, angle=0): moveX should be 0, moveY should be negative (up/north in Matter.js)
+    // NOTE: Matter.js Y+ is DOWN, so negative moveY moves UP (north toward blue goal)
+    const moveX = (vx_robot * sinAngle + vy_robot * cosAngle) * maxSpeed;
+    const moveY = -(vx_robot * cosAngle - vy_robot * sinAngle) * maxSpeed; // Negated: Matter.js Y+ is DOWN
+    
+    // #region agent log
+    if (robotId === 'attacker1' || robotId === 'blue_attacker') {
+      const posY_after = pos.y + moveY;
+      const direction = moveY < 0 ? 'north' : moveY > 0 ? 'south' : 'none';
+      fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'PhysicsEngine.ts:applyAction',message:'World movement',data:{robotId,angle_deg:angle*180/Math.PI,vx_robot,vy_robot,omega,moveX,moveY,posX_before:pos.x,posY_before:pos.y,posX_after:pos.x+moveX,posY_after,direction},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+    }
+    // #endregion // Inverted for world coords
+    const newAngle = angle + omega * maxAngular;
+    
+    // #region agent log
+    if (Math.abs(vx_robot) > 0.1 || Math.abs(vy_robot) > 0.1 || Math.abs(omega) > 0.1) {
+      fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          location: 'PhysicsEngine.ts:420',
+          message: 'coordinate transformation',
+          data: {
+            robotId,
+            angle_deg: (angle * 180 / Math.PI).toFixed(1),
+            vx_robot: vx_robot.toFixed(3),
+            vy_robot: vy_robot.toFixed(3),
+            omega: omega.toFixed(3),
+            moveX: moveX.toFixed(3),
+            moveY: moveY.toFixed(3),
+            posX_before: pos.x.toFixed(1),
+            posY_before: pos.y.toFixed(1)
+          },
+          timestamp: Date.now(),
+          sessionId: 'debug-session',
+          runId: 'run1',
+          hypothesisId: 'B'
+        })
+      }).catch(() => {});
+    }
+    // #endregion
 
     // Move robot kinematically (position-based)
     Body.setPosition(body, { x: pos.x + moveX, y: pos.y + moveY });
@@ -719,5 +878,7 @@ export class PhysicsEngine {
 }
 
 // Robot friction constant
-const ROBOT_FRICTION = 0.05;
+// Omni wheels have very low friction (can roll sideways)
+// Typical values: 0.01-0.03 for omni wheels on smooth surfaces
+const ROBOT_FRICTION = 0.02;
 

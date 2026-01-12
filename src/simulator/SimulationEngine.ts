@@ -627,22 +627,22 @@ export class SimulationEngine {
       // Check if robot exists in physics
       if (!robots.has(robotId)) {
         // Restore at starting position
-        const startingPos = this.getStartingPosition(savedState.team, savedState.role);
-        this.physics.createRobot(
-          robotId,
-          savedState.team,
-          savedState.role,
-          startingPos.x,
-          startingPos.y,
-          startingPos.angle
-        );
+          const startingPos = this.getStartingPosition(savedState.team, savedState.role);
+          this.physics.createRobot(
+            robotId,
+            savedState.team,
+            savedState.role,
+            startingPos.x,
+            startingPos.y,
+            startingPos.angle
+          );
         console.log(`[Penalty] Robot ${robotId} restored to play (penalties disabled)`);
-      }
-      
+        }
+        
       this.penaltyRobotStates.delete(robotId);
-      this.penaltyEndTimes.delete(robotId);
-      this.onGameEvent?.('robot_penalty_expired', { robotId });
-    }
+        this.penaltyEndTimes.delete(robotId);
+        this.onGameEvent?.('robot_penalty_expired', { robotId });
+      }
     
     // Clear all penalty tracking
     this.consecutiveLineCrossings.clear();

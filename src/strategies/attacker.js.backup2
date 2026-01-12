@@ -1,43 +1,22 @@
 // ============================================================
 // RoboCup Jr. Simulator - Attacker Strategy (State Machine)
-// Using Omni Wheel Drive System with Movement Primitives
-// Version: 2025-01-15
 // ============================================================
 // Motor layout (viewed from above, robot facing up):
 //   motor1 (front-left)    motor2 (front-right)
 //          [    KICKER    ]  ← FRONT (forward direction)
 //   motor4 (back-left)     motor3 (back-right)
 //
-// Omni wheel system (4 wheels at 45-degree angles):
-//   Forward kinematics: m1 = vx + vy + omega, m2 = -vx + vy + omega, m3 = vx - vy - omega, m4 = -vx - vy - omega
-//   Where: vx = forward/backward (forward = +), vy = left/right (right = +), omega = rotation (CW = +)
-
-// ============================================================
-// MOVEMENT PRIMITIVES (from movement_primitives.js)
-// ============================================================
-
-// Movement constants
-const MOVEMENT_SPEED = 0.6;
-const MAX_SPEED_CM_PER_S = 150; // cm/s (from ROBOT.MAX_SPEED)
-const FPS = 60;
-const DT_MS = 1000 / FPS; // ~16.67ms per frame
-const CM_PER_FRAME = (MAX_SPEED_CM_PER_S * MOVEMENT_SPEED) / FPS; // ~1.5 cm/frame at 0.6 speed
-
-// Clamp value between min and max
-function clamp(val, min, max) {
-  return Math_max(min, Math_min(max, val));
-}
-
-// Convert desired movement to omni wheel motor speeds
-// vx: forward/backward (forward = +), vy: left/right (right = +), omega: rotation (CW = +)
-function movementToMotors(vx, vy, omega) {
-  return {
-    motor1: clamp(vx + vy + omega, -1, 1),
-    motor2: clamp(-vx + vy + omega, -1, 1),
-    motor3: clamp(vx - vy - omega, -1, 1),
-    motor4: clamp(-vx - vy - omega, -1, 1)
-  };
-}
+// Omni wheels at 45-degree angles (diamond pattern from Arduino code):
+// Forward kinematics: m1 = vx + vy + omega, m2 = -vx + vy + omega, m3 = vx - vy - omega, m4 = -vx - vy - omega
+// Where: vx = forward/backward (forward = +), vy = left/right (right = +), omega = rotation (CW = +)
+//
+// Movement patterns:
+//   - Forward: vx > 0, vy = 0, omega = 0
+//   - Backward: vx < 0, vy = 0, omega = 0
+//   - Strafe right: vx = 0, vy > 0, omega = 0
+//   - Strafe left: vx = 0, vy < 0, omega = 0
+//   - Rotate CW: vx = 0, vy = 0, omega > 0
+//   - Rotate CCW: vx = 0, vy = 0, omega < 0
 
 // ============================================================
 // STATE MACHINE STATES
@@ -52,9 +31,6 @@ const STATE = {
 
 // Current state
 var currentState = STATE.SEARCHING;
-
-// Track whether we're currently rotating or moving forward (for hysteresis)
-var isRotatingToBall = false;
 
 // Current target (for display)
 var currentTarget = null;
@@ -100,9 +76,8 @@ var distanceMovedToGoal = 0; // Track distance moved towards own goal
 const GOAL_ADVANCE_DISTANCE_CM = 50; // Move 50cm towards own goal
 
 function strategy(worldState) {
-  
   const { ball, goal_blue, goal_yellow, we_are_blue, bumper_front, bumper_left, bumper_right, 
-          line_front, line_left, line_right, line_rear, stuck, t_ms, dt_s, heading_deg } = worldState;
+          line_front, line_left, line_right, line_rear, stuck, t_ms, dt_s } = worldState;
   
   // Target goal (opponent's goal - where we want to kick the ball)
   const targetGoal = we_are_blue ? goal_yellow : goal_blue;
@@ -112,22 +87,28 @@ function strategy(worldState) {
   let motor1 = 0, motor2 = 0, motor3 = 0, motor4 = 0;
   let kick = false;
   
+  // Helper: set all motors (deprecated - use movementToMotors instead)
+  function setMotors(fl, fr, br, bl) {
+    motor1 = fl; motor2 = fr; motor3 = br; motor4 = bl;
+  }
+  
   // Helper: turn in place (positive = turn right/CW)
-  // For omni wheels: pure rotation pattern from Arduino
-  // Rotate CW: [1, 1, -1, -1], Rotate CCW: [-1, -1, 1, 1]
+  // REVERTED: Using differential drive pattern that worked for rotation tests
+  // CW: leftSide negative, rightSide positive (leftSide < rightSide)
+  // CCW: leftSide positive, rightSide negative (leftSide > rightSide)
   function turn(speed) {
     if (speed > 0) {
-      // Rotate CW: motor1=+, motor2=+, motor3=-, motor4=-
-      motor1 = speed;
-      motor2 = speed;
-      motor3 = -speed;
-      motor4 = -speed;
+      // Rotate CW: leftSide negative, rightSide positive
+      motor1 = -speed;  // left front
+      motor4 = -speed;  // left back
+      motor2 = speed;   // right front
+      motor3 = speed;   // right back
     } else if (speed < 0) {
-      // Rotate CCW: motor1=-, motor2=-, motor3=+, motor4=+
-      motor1 = speed;
-      motor2 = speed;
-      motor3 = -speed;
-      motor4 = -speed;
+      // Rotate CCW: leftSide positive, rightSide negative
+      motor1 = -speed;  // left front (positive)
+      motor4 = -speed;  // left back (positive)
+      motor2 = speed;   // right front (negative)
+      motor3 = speed;   // right back (negative)
     } else {
       // No rotation
       motor1 = 0;
@@ -138,25 +119,65 @@ function strategy(worldState) {
   }
   
   // Helper: drive forward/backward
+  // REVERTED: Using differential drive pattern that worked for rectangle tests
+  // Forward: both sides positive (leftSide = rightSide > 0)
   function drive(speed) {
-    const motors = movementToMotors(speed, 0, 0);
-    motor1 = motors.motor1;
-    motor2 = motors.motor2;
-    motor3 = motors.motor3;
-    motor4 = motors.motor4;
+    motor1 = speed;  // left front
+    motor4 = speed;  // left back
+    motor2 = speed;  // right front
+    motor3 = speed;  // right back
   }
   
-  // Helper: move forward (robot-relative, no rotation)
-  // Pure forward movement - no steering correction to prevent spiral
-  // Uses primitive-style: separate rotation from forward movement
-  function moveForwardTowardBall(speed) {
-    // Pure forward movement in robot's current facing direction
-    // No rotation component - we're already aligned (ballAngle < 20)
-    const motors = movementToMotors(speed, 0, 0);
-    motor1 = motors.motor1;
-    motor2 = motors.motor2;
-    motor3 = motors.motor3;
-    motor4 = motors.motor4;
+  // Helper: strafe (positive = move right)
+  // REVERTED: Using differential drive pattern - strafe by turning and moving forward
+  // For true strafe with differential drive, we need to turn 90° then drive
+  // But for now, use a pattern that approximates strafe: leftSide and rightSide opposite
+  // This will cause rotation, but combined with forward movement it can approximate strafe
+  function strafe(speed) {
+    // Approximate strafe: turn slightly while moving forward
+    // This is not true strafe but works with differential drive
+    const turnAmount = speed * 0.3; // Small turn component
+    motor1 = speed - turnAmount;  // left front
+    motor4 = speed - turnAmount;  // left back
+    motor2 = speed + turnAmount;  // right front
+    motor3 = speed + turnAmount;  // right back
+  }
+  
+  // Helper: clamp value
+  function clamp(val, min, max) {
+    return Math_max(min, Math_min(max, val));
+  }
+  
+  // Helper: Convert desired movement to differential drive motor speeds
+  // REVERTED: Using differential drive interpretation that worked for rectangle/diamond/rotation tests
+  // vx = forward/backward (forward = +), omega = rotation (CW = +, CCW = -)
+  // For differential drive: leftSide = vx - omega, rightSide = vx + omega
+  // Motor mapping: m1,m4 = leftSide, m2,m3 = rightSide
+  function movementToMotors(vx, vy, omega) {
+    // For differential drive, vy (strafe) is not directly supported
+    // Convert vy to a rotation component: strafe right = turn right while moving forward
+    const leftSide = vx - omega + (vy * 0.3);  // Add small turn component for strafe
+    const rightSide = vx + omega - (vy * 0.3);
+    
+    return {
+      motor1: clamp(leftSide, -1, 1),   // left front
+      motor2: clamp(rightSide, -1, 1),   // right front
+      motor3: clamp(rightSide, -1, 1),   // right back
+      motor4: clamp(leftSide, -1, 1)     // left back
+    };
+  }
+  
+  // Helper: Strafe at any angle while maintaining forward orientation
+  // REVERTED: For differential drive, strafe is approximated by turning and moving
+  // angle_deg: angle in degrees (0 = forward, 90 = right, -90 = left, 180 = backward)
+  // speed: movement speed (0..1)
+  // omega: optional rotation speed (default 0 to maintain orientation)
+  function strafeAtAngle(angle_deg, speed, omega = 0) {
+    // Convert angle to forward/backward and turn components
+    const angle_rad = angle_deg * Math_PI / 180;
+    const vx = speed * Math_cos(angle_rad);
+    const turnComponent = speed * Math_sin(angle_rad) * 0.5; // Convert strafe to turn
+    return movementToMotors(vx, 0, omega + turnComponent);
   }
   
   // ============================================================
@@ -179,7 +200,7 @@ function strategy(worldState) {
         currentTarget = 'yellow goal';
         resetInitialDistance = goal_yellow.distance;
       }
-      // Reset rotation tracking
+      // Reset rotation tracking (not needed for omni but kept for compatibility)
       resetRotationAccumulated = 0;
       resetLastHeading = null;
       resetDistanceMoved = 0; // Reset distance tracking
@@ -203,7 +224,13 @@ function strategy(worldState) {
       }
     }
     
+    // #region agent log
+    fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'attacker.js:145',message:'RESET_POSITION distance tracking',data:{resetInitialDistance,furthestGoalDist,resetDistanceMoved,furthestGoalVis,exitCondition60:resetDistanceMoved >= 60},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'Q'})}).catch(()=>{});
+    // #endregion
+    
     // Exit reset after moving 60cm toward the target goal
+    // REMOVED fallback condition - we should only exit after moving 60cm, not when reaching goal
+    // This ensures we move exactly 60cm toward the goal, regardless of how close we get
     if (resetDistanceMoved >= 60) {
       ignoreLineDetection = false;
       resetEvents = []; // Clear reset events
@@ -217,10 +244,12 @@ function strategy(worldState) {
       return { motor1, motor2, motor3, motor4, kick };
     }
     
-    // Move toward goal using omni wheel movement
+    // Move toward goal using differential drive (turn + forward)
+    // Physics engine uses differential drive, not true omnidirectional
     if (furthestGoalVis) {
       // Goal is visible - turn toward it and move forward
       const goalAngle = furthestGoalAngle;
+      const goalDist = furthestGoalDist;
       const absAngle = Math_abs(goalAngle);
       
       // If goal is behind (>90° or <-90°), turn in place first
@@ -277,14 +306,24 @@ function strategy(worldState) {
     resetEvents = resetEvents.filter(e => t_ms - e.time < RESET_EVENT_WINDOW_MS);
     
     // Check if we should go to RESET_POSITION
+    // CRITICAL: Don't enter RESET_POSITION if ball is visible and close - prioritize attacking!
+    // Attackers should only reset when truly stuck, not when they can see the ball
     const ballVisibleAndClose = ball.visible && ball.distance < 80; // Ball within 80cm
     
     // Count event types for debugging
     const stuckCount = resetEvents.filter(e => e.type === 'stuck').length;
     const uncrossingCount = resetEvents.filter(e => e.type === 'uncrossing').length;
     
+    // #region agent log
+    fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'attacker.js:245',message:'UNCROSSING_LINE reset check',data:{resetEventsLength:resetEvents.length,stuckCount,uncrossingCount,RESET_EVENT_THRESHOLD,ballVisible:ball.visible,ballDist:ball.visible ? ball.distance : null,ballVisibleAndClose,willEnterReset:uncrossingCount >= RESET_EVENT_THRESHOLD},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'Z'})}).catch(()=>{});
+    // #endregion
+    
     // Enter RESET_POSITION if we have 3+ uncrossing events (regardless of ball visibility)
+    // This ensures we reset after multiple line crossings
     if (uncrossingCount >= RESET_EVENT_THRESHOLD) {
+      // #region agent log
+      fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'attacker.js:242',message:'UNCROSSING_LINE entering RESET_POSITION',data:{resetEventsLength:resetEvents.length,ballVisible:ball.visible,ballDist:ball.visible ? ball.distance : null},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'AA'})}).catch(()=>{});
+      // #endregion
       currentState = STATE.RESET_POSITION;
       ignoreLineDetection = true;
       resetEvents = []; // Clear events
@@ -435,6 +474,12 @@ function strategy(worldState) {
         // Remove events older than window
         resetEvents = resetEvents.filter(e => t_ms - e.time < RESET_EVENT_WINDOW_MS);
         
+        // #region agent log
+        const stuckCount = resetEvents.filter(e => e.type === 'stuck').length;
+        const uncrossingCount = resetEvents.filter(e => e.type === 'uncrossing').length;
+        fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'attacker.js:397',message:'UNCROSSING_LINE event recorded',data:{resetEventsLength:resetEvents.length,stuckCount,uncrossingCount,RESET_EVENT_THRESHOLD},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'AD'})}).catch(()=>{});
+        // #endregion
+        
         // Start reversing immediately
         const BACKOFF_MOTOR_VALUE = 0.6;
         const forwardSpeed = reverseDirection.y * BACKOFF_MOTOR_VALUE;
@@ -474,7 +519,13 @@ function strategy(worldState) {
     // If no longer stuck AND minimum time has passed, transition back to appropriate state
     const timeInStuck = t_ms - stuckEntryTime;
     const canExit = !stuck && !bumper_front && !bumper_left && !bumper_right && timeInStuck >= MIN_STUCK_TIME_MS;
+    // #region agent log
+    fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'attacker.js:432',message:'STUCK exit check',data:{stuck,bumper_front,bumper_left,bumper_right,ballVisible:ball.visible,timeInStuck,MIN_STUCK_TIME_MS,canExit},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H'})}).catch(()=>{});
+    // #endregion
     if (canExit) {
+      // #region agent log
+      fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'attacker.js:437',message:'STUCK exiting',data:{stuck,bumper_front,bumper_left,bumper_right,ballVisible:ball.visible,timeInStuck,newState:ball.visible ? 'ATTACKING' : 'SEARCHING'},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'I'})}).catch(()=>{});
+      // #endregion
       stuckEntryTime = null; // Reset stuck entry time
       ignoreLineDetection = false;
       // Transition back based on ball visibility
@@ -487,28 +538,48 @@ function strategy(worldState) {
       // Still stuck - handle stuck behavior
       if (stuck || bumper_front) {
     drive(-0.5);
+        // #region agent log
+        fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'attacker.js:506',message:'STUCK driving backward',data:{stuck,bumper_front,motor1,motor2,motor3,motor4},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
+        // #endregion
         return { motor1, motor2, motor3, motor4, kick };
       }
       
       if (bumper_left) {
         turn(0.5);
+        // #region agent log
+        fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'attacker.js:512',message:'STUCK turning right',data:{bumper_left,motor1,motor2,motor3,motor4},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
+        // #endregion
         return { motor1, motor2, motor3, motor4, kick };
       }
       
       if (bumper_right) {
         turn(-0.5);
+        // #region agent log
+        fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'attacker.js:517',message:'STUCK turning left',data:{bumper_right,motor1,motor2,motor3,motor4},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
+        // #endregion
         return { motor1, motor2, motor3, motor4, kick };
       }
       
       // If no bumpers but can't exit yet (time constraint), wait in place
       // Don't return zero motors - at least try to turn slightly
       turn(0.1);
+      
+      // #region agent log
+      fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'attacker.js:523',message:'STUCK no bumpers, turning',data:{stuck,bumper_front,bumper_left,bumper_right,timeInStuck,motor1,motor2,motor3,motor4},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
+      // #endregion
+      
     return { motor1, motor2, motor3, motor4, kick };
   }
   }
   
   // Check if we just became stuck (not already in STUCK state)
+  // #region agent log
+  fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'attacker.js:456',message:'STUCK entry check',data:{currentState,stuck,bumper_front,bumper_left,bumper_right,willEnter:currentState !== STATE.STUCK && (stuck || bumper_front || bumper_left || bumper_right)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'F'})}).catch(()=>{});
+  // #endregion
   if (currentState !== STATE.STUCK && (stuck || bumper_front || bumper_left || bumper_right)) {
+    // #region agent log
+    fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'attacker.js:472',message:'Entering STUCK state',data:{stuck,bumper_front,bumper_left,bumper_right,previousState:currentState},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'G'})}).catch(()=>{});
+    // #endregion
     currentState = STATE.STUCK;
     stuckEntryTime = t_ms; // Record when we entered STUCK
     ignoreLineDetection = true;
@@ -522,8 +593,16 @@ function strategy(worldState) {
     const stuckCount = resetEvents.filter(e => e.type === 'stuck').length;
     const uncrossingCount = resetEvents.filter(e => e.type === 'uncrossing').length;
     
+    // #region agent log
+    fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'attacker.js:497',message:'STUCK reset check',data:{resetEventsLength:resetEvents.length,stuckCount,uncrossingCount,RESET_EVENT_THRESHOLD,ballVisible:ball.visible,ballDist:ball.visible ? ball.distance : null,willEnterReset:stuckCount >= RESET_EVENT_THRESHOLD},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'AB'})}).catch(()=>{});
+    // #endregion
+    
     // Enter RESET_POSITION if we have 3+ stuck events (regardless of ball visibility)
+    // If we're stuck 3+ times, we need to reset to recover, even if ball is visible
     if (stuckCount >= RESET_EVENT_THRESHOLD) {
+      // #region agent log
+      fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'attacker.js:464',message:'STUCK entering RESET_POSITION',data:{resetEventsLength:resetEvents.length,ballVisible:ball.visible,ballDist:ball.visible ? ball.distance : null},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'AC'})}).catch(()=>{});
+      // #endregion
       currentState = STATE.RESET_POSITION;
       ignoreLineDetection = true;
       resetEvents = []; // Clear events
@@ -568,6 +647,8 @@ function strategy(worldState) {
   // GLOBAL CHECK: RESET_POSITION after 3+ uncrossing events
   // ============================================================
   // Check if we should enter RESET_POSITION due to multiple line crossings
+  // This check runs in all states (except RESET_POSITION itself) to catch cases where
+  // we exited UNCROSSING_LINE before accumulating 3 events
   if (currentState !== STATE.RESET_POSITION && currentState !== STATE.UNCROSSING_LINE && currentState !== STATE.STUCK) {
     // Remove events older than window
     resetEvents = resetEvents.filter(e => t_ms - e.time < RESET_EVENT_WINDOW_MS);
@@ -576,7 +657,11 @@ function strategy(worldState) {
     const uncrossingCount = resetEvents.filter(e => e.type === 'uncrossing').length;
     
     // If we have 3+ uncrossing events, enter RESET_POSITION (regardless of ball visibility)
+    // This ensures we reset after multiple line crossings even if ball is visible
     if (uncrossingCount >= RESET_EVENT_THRESHOLD) {
+      // #region agent log
+      fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'attacker.js:562',message:'Global check entering RESET_POSITION (3+ uncrossing events)',data:{uncrossingCount,RESET_EVENT_THRESHOLD,currentState,ballVisible:ball.visible,ballDist:ball.visible ? ball.distance : null},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'AE'})}).catch(()=>{});
+      // #endregion
       currentState = STATE.RESET_POSITION;
       ignoreLineDetection = true;
       resetEvents = []; // Clear events
@@ -617,28 +702,25 @@ function strategy(worldState) {
     searchTime += dt_s * 1000;
     lastBallVisible = false;
     
-    // Search pattern: alternate between rotating and moving forward (separate, not combined)
-    // Use primitives: rotate OR move, not both to prevent spiral
-    const searchPhase = Math_floor(searchTime / 2000) % 4;
-    if (searchPhase === 0 || searchPhase === 2) {
-      // Rotate in place (no forward movement)
-      const searchDir = (searchPhase === 0) ? 1 : -1;
-      const turnSpeed = 0.6 * searchDir;
-      turn(turnSpeed);
-    } else {
-      // Move forward (no rotation)
-      const forwardSpeed = 0.5;
-      drive(forwardSpeed);
-    }
-    
+      // Search pattern: turn while moving forward to cover more area
+    const searchDir = (Math_floor(searchTime / 2000) % 2 === 0) ? 1 : -1;
+      const turnSpeed = 0.5 * searchDir;
+      const forwardSpeed = 0.4; // Move forward while searching
+      
+      // Combine turning and forward movement
+      const motors = movementToMotors(forwardSpeed, 0, turnSpeed);
+      motor1 = motors.motor1;
+      motor2 = motors.motor2;
+      motor3 = motors.motor3;
+      motor4 = motors.motor4;
+      
     return { motor1, motor2, motor3, motor4, kick };
-  } else {
-    // Ball found - transition to ATTACKING
-    lastBallVisible = true;
-    searchTime = 0;
-    currentState = STATE.ATTACKING;
-    // Don't return here - let ATTACKING state handle it
-  }
+    } else {
+      // Ball found - transition to ATTACKING
+  lastBallVisible = true;
+  searchTime = 0;
+      currentState = STATE.ATTACKING;
+    }
   }
   
   // ============================================================
@@ -648,23 +730,12 @@ function strategy(worldState) {
     // Set target for display
     currentTarget = 'ball';
     
-    // If ball lost, transition to SEARCHING and set search motors
+    // If ball lost, transition to SEARCHING
     if (!ball.visible) {
       currentState = STATE.SEARCHING;
-      // Set search movement motors before transitioning
-      searchTime += dt_s * 1000;
-      const searchDir = (Math_floor(searchTime / 2000) % 2 === 0) ? 1 : -1;
-      const turnSpeed = 0.5 * searchDir;
-      const forwardSpeed = 0.4;
-      const motors = movementToMotors(forwardSpeed, 0, turnSpeed);
-      motor1 = motors.motor1;
-      motor2 = motors.motor2;
-      motor3 = motors.motor3;
-      motor4 = motors.motor4;
       return { motor1, motor2, motor3, motor4, kick };
     }
     
-    // Ball is visible - continue with ATTACKING logic
     const ballAngle = ball.angle_deg;
   const ballDist = ball.distance;
   const goalVisible = targetGoal.visible;
@@ -678,6 +749,10 @@ function strategy(worldState) {
   
   // CRITICAL: If we're close to ball and aligned with our own goal, reposition immediately!
   const dangerZone = ballDist < 40 && alignedWithOwnGoal;
+    
+    // #region agent log
+    fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'attacker.js:687',message:'ATTACKING state entry',data:{ballAngle,ballDist,goalVisible,goalAngle,ownGoalVisible,ownGoalAngle,alignedWithOwnGoal,dangerZone},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A,B,C,D,E'})}).catch(()=>{});
+    // #endregion
   
   // --- CRITICAL: AVOID OWN GOAL - Reposition if aligned with own goal ---
   if (dangerZone) {
@@ -695,56 +770,94 @@ function strategy(worldState) {
     return { motor1, motor2, motor3, motor4, kick };
   }
   
-  // --- APPROACH: Rotate toward ball, then drive forward ---
-  // Use primitives: rotate OR move forward, never both at once
-  // Use hysteresis to prevent oscillation: wider threshold to start rotating, narrower to stop
-  const ROTATE_THRESHOLD_START = 15; // Start rotating if misaligned by this much
-  const ROTATE_THRESHOLD_STOP = 5;  // Stop rotating and start moving if aligned within this
-  
-  // Step 1: Rotate to face the ball (if significantly misaligned)
-  if (Math_abs(ballAngle) > (isRotatingToBall ? ROTATE_THRESHOLD_STOP : ROTATE_THRESHOLD_START)) {
-    
-    isRotatingToBall = true; // Mark that we're rotating
+  // --- APPROACH: Ball is far, turn to face it ---
+  if (Math_abs(ballAngle) > 15) {
+    // #region agent log
+    fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'attacker.js:757',message:'ATTACKING TURN PATH',data:{ballAngle,ballDist,ownGoalInFront,alignedWithOwnGoal,condition1:ownGoalInFront && ballDist < 50},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H1'})}).catch(()=>{});
+    // #endregion
     
     // If own goal is in front and we're turning toward it, turn the other way
     if (ownGoalInFront && ballDist < 50) {
       const turnAway = ownGoalAngle > 0 ? -1 : 1;
-      const turnSpeed = 0.7 * turnAway;
-      // Pure rotation away from own goal
-      turn(turnSpeed);
+        const turnSpeed = 0.7 * turnAway;
+        // Use turn() function for pure rotation
+        turn(turnSpeed);
+        
+        // #region agent log
+        fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'attacker.js:762',message:'ATTACKING turning away from own goal',data:{ballAngle,ballDist,turnAway,turnSpeed,motor1,motor2,motor3,motor4},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
+        // #endregion
     } else {
-      // Rotate toward ball (pure rotation, no forward movement)
-      // Use proportional control: faster rotation for larger angles
-      const turnSpeed = clamp(ballAngle / 25, -1, 1) * 0.8;
+      const turnSpeed = clamp(ballAngle / 35, -1, 1) * 0.7;
+      // Use turn() function for pure rotation
       turn(turnSpeed);
+    
+        // Always add forward motion when turning toward ball (unless aligned with own goal)
+        if (!alignedWithOwnGoal) {
+          // More forward motion when ball is farther away
+          const fwd = clamp(ballDist / 150, 0.2, 0.5);
+          const fwdMotors = movementToMotors(fwd, 0, 0);
+          motor1 += fwdMotors.motor1;
+          motor2 += fwdMotors.motor2;
+          motor3 += fwdMotors.motor3;
+          motor4 += fwdMotors.motor4;
+        }
+        
+        // #region agent log
+        fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'attacker.js:777',message:'ATTACKING turning toward ball',data:{ballAngle,ballDist,turnSpeed,forwardMotion:!alignedWithOwnGoal,motor1,motor2,motor3,motor4},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A,B,C'})}).catch(()=>{});
+        // #endregion
     }
     return { motor1, motor2, motor3, motor4, kick };
   }
   
-  // Step 2: Drive forward toward ball (aligned, within threshold)
+  // --- APPROACH: Drive toward ball with simple, stable logic ---
+  // Simplified approach to reduce oscillation
   if (ballDist > 15) {
-    
-    isRotatingToBall = false; // Mark that we're moving forward
+    // #region agent log
+    fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'attacker.js:799',message:'ATTACKING APPROACH PATH',data:{ballAngle,ballDist,alignedWithOwnGoal,ownGoalAngle},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H1'})}).catch(()=>{});
+    // #endregion
     
     // Don't approach if we're aligned with own goal - reposition instead
     if (alignedWithOwnGoal) {
       const turnAway = ownGoalAngle > 0 ? -1 : 1;
+      const backSpeed = -0.5;
       const turnSpeed = 0.6 * turnAway;
-      // Pure rotation away from own goal
-      turn(turnSpeed);
-      isRotatingToBall = true;
+      
+      const motors = movementToMotors(backSpeed, 0, turnSpeed);
+      motor1 = motors.motor1;
+      motor2 = motors.motor2;
+      motor3 = motors.motor3;
+      motor4 = motors.motor4;
+      
+      // #region agent log
+      fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'attacker.js:808',message:'ATTACKING backing away from own goal',data:{ballAngle,ballDist,backSpeed,turnSpeed,motor1,motor2,motor3,motor4},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H1'})}).catch(()=>{});
+      // #endregion
+      
       return { motor1, motor2, motor3, motor4, kick };
     }
     
-    // Move forward toward ball (pure forward, no rotation - we're already aligned)
-    // Speed increases with distance to reach ball faster
-    const speed = clamp(0.5 + ballDist / 250, 0.5, 0.9);
-    drive(speed); // Use drive() for pure forward movement
+    // Simple forward movement with small steering correction
+    // Reduce steering gain to prevent oscillation
+    const speed = clamp(0.4 + ballDist / 300, 0.4, 0.8);
+    const steer = clamp(ballAngle / 80, -0.15, 0.15); // Reduced steering gain
+    
+    // Forward movement with steering correction
+    const motors = movementToMotors(speed, 0, steer);
+    motor1 = motors.motor1;
+    motor2 = motors.motor2;
+    motor3 = motors.motor3;
+    motor4 = motors.motor4;
+    
+    // #region agent log
+    fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'attacker.js:825',message:'ATTACKING approaching ball',data:{ballAngle,ballDist,speed,steer,vx:speed,vy:0,omega:steer,motor1,motor2,motor3,motor4,allZero:Math_abs(motor1)<0.01&&Math_abs(motor2)<0.01&&Math_abs(motor3)<0.01&&Math_abs(motor4)<0.01},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H1,H2,H3'})}).catch(()=>{});
+    // #endregion
     
     return { motor1, motor2, motor3, motor4, kick };
   }
   
   // --- CLOSE TO BALL: Push forward and kick ---
+  // #region agent log
+  fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'attacker.js:836',message:'ATTACKING CLOSE PATH',data:{ballAngle,ballDist,alignedWithOwnGoal,goalVisible,goalAngle},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H1'})}).catch(()=>{});
+  // #endregion
   
   // CRITICAL: Never push/kick if aligned with own goal!
   if (alignedWithOwnGoal) {
@@ -759,19 +872,27 @@ function strategy(worldState) {
     motor3 = motors.motor3;
     motor4 = motors.motor4;
     
+    // #region agent log
+    fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'attacker.js:845',message:'ATTACKING close - backing from own goal',data:{ballDist,ballAngle,backSpeed,turnSpeed,motor1,motor2,motor3,motor4},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H1'})}).catch(()=>{});
+    // #endregion
+    
     return { motor1, motor2, motor3, motor4, kick };
   }
   
-  // Push forward toward ball (close to ball, no rotation to prevent spiral)
-  // Use primitive-style movement: pure forward, no steering correction
-  const pushSpeed = 0.7;
-  moveForwardTowardBall(pushSpeed);
+  // Push forward with small goal bias (if goal visible)
+  const goalBias = goalVisible ? clamp(goalAngle / 80, -0.1, 0.1) : 0; // Reduced bias
+  const pushSpeed = 0.7; // Reduced speed to prevent overshooting
   
-  const motors = { motor1, motor2, motor3, motor4 };
+  // Push forward with goal bias
+  const motors = movementToMotors(pushSpeed, 0, goalBias);
   motor1 = motors.motor1;
   motor2 = motors.motor2;
   motor3 = motors.motor3;
   motor4 = motors.motor4;
+  
+  // #region agent log
+  fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'attacker.js:860',message:'ATTACKING pushing ball',data:{ballDist,ballAngle,goalBias,pushSpeed,vx:pushSpeed,vy:0,omega:goalBias,motor1,motor2,motor3,motor4,allZero:Math_abs(motor1)<0.01&&Math_abs(motor2)<0.01&&Math_abs(motor3)<0.01&&Math_abs(motor4)<0.01},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H1,H2,H3'})}).catch(()=>{});
+  // #endregion
   
   // Kick when aligned with TARGET goal and close, but NEVER when aligned with own goal
   if (ballDist < 20 && Math_abs(ballAngle) < 8 && !alignedWithOwnGoal) {
@@ -787,33 +908,9 @@ function strategy(worldState) {
     return { motor1, motor2, motor3, motor4, kick };
   }
   
-  // Fallback: ALWAYS ensure motors are set (even if they're zero, set them to a default movement)
-  // This ensures robots always move, even during state transitions or edge cases
-  const allMotorsZero = (motor1 === 0 || isNaN(motor1)) && 
-                        (motor2 === 0 || isNaN(motor2)) && 
-                        (motor3 === 0 || isNaN(motor3)) && 
-                        (motor4 === 0 || isNaN(motor4));
-  
-  
-  if (allMotorsZero) {
-    // Default search movement - always move forward while turning
-    const searchDir = (Math_floor((t_ms || 0) / 2000) % 2 === 0) ? 1 : -1;
-    const turnSpeed = 0.5 * searchDir;
-    const forwardSpeed = 0.4;
-    const motors = movementToMotors(forwardSpeed, 0, turnSpeed);
-    motor1 = motors.motor1;
-    motor2 = motors.motor2;
-    motor3 = motors.motor3;
-    motor4 = motors.motor4;
-    
-  }
-  
-  // Ensure all motors are valid numbers
-  motor1 = isNaN(motor1) ? 0 : motor1;
-  motor2 = isNaN(motor2) ? 0 : motor2;
-  motor3 = isNaN(motor3) ? 0 : motor3;
-  motor4 = isNaN(motor4) ? 0 : motor4;
-  
+  // #region agent log
+  fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'attacker.js:859',message:'ATTACKER final return',data:{currentState,motor1,motor2,motor3,motor4,kick,allZero:motor1===0&&motor2===0&&motor3===0&&motor4===0},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A,B,C,D,E'})}).catch(()=>{});
+  // #endregion
   
   return { motor1, motor2, motor3, motor4, kick };
 }

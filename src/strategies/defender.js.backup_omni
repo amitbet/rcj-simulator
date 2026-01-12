@@ -1,50 +1,23 @@
 // ============================================================
 // RoboCup Jr. Simulator - Defender Strategy (State Machine)
-// Using Omni Wheel Drive System with Movement Primitives
-// Version: 2025-01-15
 // ============================================================
-// Motor layout (viewed from above, robot facing up):
+// Motor layout (viewed from above):
 //   motor1 (front-left)    motor2 (front-right)
 //          [    KICKER    ]  ← FRONT (forward direction)
 //   motor4 (back-left)     motor3 (back-right)
 //
-// Omni wheel system (4 wheels at 45-degree angles):
-//   Forward kinematics: m1 = vx + vy + omega, m2 = -vx + vy + omega, m3 = vx - vy - omega, m4 = -vx - vy - omega
-//   Where: vx = forward/backward (forward = +), vy = left/right (right = +), omega = rotation (CW = +)
-
-// ============================================================
-// MOVEMENT PRIMITIVES (from movement_primitives.js)
-// ============================================================
-
-// Movement constants
-const MOVEMENT_SPEED = 0.6;
-const MAX_SPEED_CM_PER_S = 150; // cm/s (from ROBOT.MAX_SPEED)
-const FPS = 60;
-const DT_MS = 1000 / FPS; // ~16.67ms per frame
-const CM_PER_FRAME = (MAX_SPEED_CM_PER_S * MOVEMENT_SPEED) / FPS; // ~1.5 cm/frame at 0.6 speed
-
-// Clamp value between min and max
-function clamp(val, min, max) {
-  return Math_max(min, Math_min(max, val));
-}
-
-// Convert desired movement to omni wheel motor speeds
-// vx: forward/backward (forward = +), vy: left/right (right = +), omega: rotation (CW = +)
-// Forward movement = [+1, -1, +1, -1] (from Arduino: motor1=Front Left=+, motor2=Front Right=-, motor3=Back Right=+, motor4=Back Left=-)
-// Plus direction = CCW rotation
-// Forward kinematics from Arduino pattern:
-// m1 = vx + vy + omega (Front Left)
-// m2 = -vx + vy + omega (Front Right)
-// m3 = vx - vy - omega (Back Right)
-// m4 = -vx - vy - omega (Back Left)
-function movementToMotors(vx, vy, omega) {
-  return {
-    motor1: clamp(vx + vy + omega, -1, 1),   // Front Left
-    motor2: clamp(-vx + vy + omega, -1, 1),  // Front Right
-    motor3: clamp(vx - vy - omega, -1, 1),   // Back Right
-    motor4: clamp(-vx - vy - omega, -1, 1)   // Back Left
-  };
-}
+// Omni wheels at 45-degree angles:
+//   - motor1: wheel at 45° (pointing forward-right)
+//   - motor2: wheel at -45° (pointing forward-left)
+//   - motor3: wheel at 45° (pointing back-left)
+//   - motor4: wheel at -45° (pointing back-right)
+//
+// Forward kinematics (from desired velocity to motor speeds):
+//   m1 = (vx + vy) / sqrt(2) + ω
+//   m2 = (vx - vy) / sqrt(2) + ω
+//   m3 = (-vx - vy) / sqrt(2) + ω
+//   m4 = (-vx + vy) / sqrt(2) + ω
+//   Where vx = forward/backward, vy = left/right, ω = rotation
 
 // ============================================================
 // STATE MACHINE STATES
@@ -108,6 +81,9 @@ function strategy(worldState) {
   const { ball, goal_blue, goal_yellow, we_are_blue, bumper_front, bumper_left, bumper_right,
           line_front, line_left, line_right, line_rear, stuck, t_ms, dt_s } = worldState;
   
+  // #region agent log
+  fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'defender.js:73',message:'State check',data:{currentState,validState:Object.values(STATE).includes(currentState),lineFront:line_front,lineLeft:line_left,lineRight:line_right,lineRear:line_rear,ignoreLineDetection,stuck,bumper_front,bumper_left,bumper_right},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'AF'})}).catch(()=>{});
+  // #endregion
   
   // Our goal (the one we defend)
   const ownGoal = we_are_blue ? goal_blue : goal_yellow;
@@ -122,22 +98,47 @@ function strategy(worldState) {
   // Deflecting zone - can go up to 100cm from own goal (edge of half-field)
   const MAX_DEFLECTING_DISTANCE = 100;
   
+  // Helper: clamp value
+  function clamp(val, min, max) {
+    return Math_max(min, Math_min(max, val));
+  }
+  
+  // Helper: Convert desired movement to differential drive motor speeds
+  // REVERTED: Using differential drive interpretation that worked for rectangle/diamond/rotation tests
+  // vx = forward/backward (forward = +), omega = rotation (CW = +, CCW = -)
+  // For differential drive: leftSide = vx - omega, rightSide = vx + omega
+  // Motor mapping: m1,m4 = leftSide, m2,m3 = rightSide
+  function movementToMotors(vx, vy, omega) {
+    // For differential drive, vy (strafe) is not directly supported
+    // Convert vy to a rotation component: strafe right = turn right while moving forward
+    const leftSide = vx - omega + (vy * 0.3);  // Add small turn component for strafe
+    const rightSide = vx + omega - (vy * 0.3);
+    
+    return {
+      motor1: clamp(leftSide, -1, 1),   // left front
+      motor2: clamp(rightSide, -1, 1),   // right front
+      motor3: clamp(rightSide, -1, 1),   // right back
+      motor4: clamp(leftSide, -1, 1)     // left back
+    };
+  }
+  
   // Helper: turn in place (positive = turn right/CW)
-  // For omni wheels: pure rotation pattern from Arduino
-  // Rotate CW: [1, 1, -1, -1], Rotate CCW: [-1, -1, 1, 1]
+  // REVERTED: Using differential drive pattern that worked for rotation tests
+  // CW: leftSide negative, rightSide positive (leftSide < rightSide)
+  // CCW: leftSide positive, rightSide negative (leftSide > rightSide)
   function turn(speed) {
     if (speed > 0) {
-      // Rotate CW: motor1=+, motor2=+, motor3=-, motor4=-
-      motor1 = speed;
-      motor2 = speed;
-      motor3 = -speed;
-      motor4 = -speed;
+      // Rotate CW: leftSide negative, rightSide positive
+      motor1 = -speed;  // left front
+      motor4 = -speed;  // left back
+      motor2 = speed;   // right front
+      motor3 = speed;   // right back
     } else if (speed < 0) {
-      // Rotate CCW: motor1=-, motor2=-, motor3=+, motor4=+
-      motor1 = speed;
-      motor2 = speed;
-      motor3 = -speed;
-      motor4 = -speed;
+      // Rotate CCW: leftSide positive, rightSide negative
+      motor1 = -speed;  // left front (positive)
+      motor4 = -speed;  // left back (positive)
+      motor2 = speed;   // right front (negative)
+      motor3 = speed;   // right back (negative)
     } else {
       // No rotation
       motor1 = 0;
@@ -166,31 +167,12 @@ function strategy(worldState) {
     // Ensure state is always valid - default to DEFENDING if invalid
     let validState = currentState;
     if (!validState || !Object.values(STATE).includes(validState)) {
+      // #region agent log
+      fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'defender.js:100',message:'Invalid state in returnAction, defaulting to DEFENDING',data:{invalidState:currentState,validStates:Object.values(STATE)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'AK'})}).catch(()=>{});
+      // #endregion
       validState = STATE.DEFENDING;
       currentState = STATE.DEFENDING; // Also update the global state
     }
-    
-    // CRITICAL: Fallback - ALWAYS ensure motors are set (even if they're zero, set them to a default movement)
-    // This ensures robots always move, even during state transitions or edge cases
-    const allMotorsZero = (motor1 === 0 || isNaN(motor1)) && 
-                          (motor2 === 0 || isNaN(motor2)) && 
-                          (motor3 === 0 || isNaN(motor3)) && 
-                          (motor4 === 0 || isNaN(motor4));
-    
-    if (allMotorsZero) {
-      // Default defending movement - small forward movement
-      const motors = movementToMotors(0.3, 0, 0.2);
-      motor1 = motors.motor1;
-      motor2 = motors.motor2;
-      motor3 = motors.motor3;
-      motor4 = motors.motor4;
-    }
-    
-    // Ensure all motors are valid numbers
-    motor1 = isNaN(motor1) ? 0 : motor1;
-    motor2 = isNaN(motor2) ? 0 : motor2;
-    motor3 = isNaN(motor3) ? 0 : motor3;
-    motor4 = isNaN(motor4) ? 0 : motor4;
     
     const result = { motor1, motor2, motor3, motor4, kick };
     result._state = validState;
@@ -225,6 +207,9 @@ function strategy(worldState) {
       resetLastHeading = null;
       resetDistanceMoved = 0; // Reset distance tracking
       
+      // #region agent log
+      fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'defender.js:127',message:'RESET_POSITION initialized (furthest goal)',data:{resetTargetGoalIsBlue,resetInitialDistance,goalBlueDist:goal_blue.distance,goalYellowDist:goal_yellow.distance,we_are_blue,ownGoalDist:ownGoal.distance},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'BS'})}).catch(()=>{});
+      // #endregion
     }
     
     // Always set target to goal (never ball) in RESET_POSITION
@@ -240,6 +225,9 @@ function strategy(worldState) {
     // Limit movement: 30cm if opponent goal, 60cm if own goal
     const maxResetDistance = isOpponentGoal ? 30 : 60;
     
+    // #region agent log
+    fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'defender.js:155',message:'RESET_POSITION active (furthest goal)',data:{furthestGoalDist,furthestGoalVis,resetInitialDistance,resetDistanceMoved,resetTargetGoalIsBlue,isOpponentGoal,maxResetDistance,we_are_blue},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'BT'})}).catch(()=>{});
+    // #endregion
     
     // Calculate distance moved toward goal (difference from initial distance)
     // Only update if goal is visible - if not visible, keep last known value
@@ -251,14 +239,23 @@ function strategy(worldState) {
       }
     }
     
+    // #region agent log
+    fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'defender.js:173',message:'RESET_POSITION distance tracking (toward furthest goal)',data:{resetInitialDistance,furthestGoalDist,resetDistanceMoved,furthestGoalVis,resetTargetGoalIsBlue,isOpponentGoal,maxResetDistance,exitCondition:resetDistanceMoved >= maxResetDistance},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'BX'})}).catch(()=>{});
+    // #endregion
     
     // Exit reset after moving the appropriate distance toward the target goal
     // If targeting opponent goal, limit to 30cm; if own goal, allow 60cm
     // CRITICAL: Only exit RESET_POSITION when minimum distance has been moved
     // This ensures RESET_POSITION completes before allowing transitions to other states
     
+    // #region agent log
+    fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'defender.js:181',message:'RESET_POSITION exit check',data:{resetDistanceMoved,furthestGoalDist,furthestGoalVis,isOpponentGoal,maxResetDistance,checkExit:resetDistanceMoved >= maxResetDistance,willExit:resetDistanceMoved >= maxResetDistance},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'BY'})}).catch(()=>{});
+    // #endregion
     
     if (resetDistanceMoved >= maxResetDistance) {
+      // #region agent log
+      fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'defender.js:186',message:'RESET_POSITION exiting - distance requirement met',data:{resetDistanceMoved,furthestGoalDist,furthestGoalVis,isOpponentGoal,maxResetDistance,exitReason:`moved${maxResetDistance}cm`},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'BZ'})}).catch(()=>{});
+      // #endregion
       ignoreLineDetection = false;
       resetEvents = []; // Clear reset events
       resetTargetGoalIsBlue = null; // Clear locked goal
@@ -271,6 +268,9 @@ function strategy(worldState) {
       return returnAction();
     }
     
+    // #region agent log
+    fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'defender.js:203',message:'RESET_POSITION continuing - distance not yet met',data:{resetDistanceMoved,maxResetDistance,remaining:maxResetDistance - resetDistanceMoved},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'CA'})}).catch(()=>{});
+    // #endregion
     
     // Move toward goal using differential drive (turn + forward)
     // Physics engine uses differential drive, not true omnidirectional
@@ -284,37 +284,35 @@ function strategy(worldState) {
       if (absAngle > 90) {
         // Turn in place (no forward movement) - goal is behind
         const turnSpeed = clamp(goalAngle / 60, -1, 1) * 0.8; // Slower turn when behind
-        const motors = movementToMotors(0, 0, turnSpeed);
-        motor1 = motors.motor1;
-        motor2 = motors.motor2;
-        motor3 = motors.motor3;
-        motor4 = motors.motor4;
+        
+        motor1 = -turnSpeed; // Left side
+        motor4 = -turnSpeed;
+        motor2 = turnSpeed; // Right side
+        motor3 = turnSpeed;
       } else if (absAngle > 15) {
         // Goal is to the side - turn while moving forward slowly
         const turnSpeed = clamp(goalAngle / 50, -1, 1) * 0.6;
         const forwardSpeed = 0.4; // Moderate forward speed while turning
-        const motors = movementToMotors(forwardSpeed, 0, turnSpeed);
-        motor1 = motors.motor1;
-        motor2 = motors.motor2;
-        motor3 = motors.motor3;
-        motor4 = motors.motor4;
+        
+        motor1 = forwardSpeed - turnSpeed; // Left side
+        motor4 = forwardSpeed - turnSpeed;
+        motor2 = forwardSpeed + turnSpeed; // Right side
+        motor3 = forwardSpeed + turnSpeed;
       } else {
         // Goal is aligned - move straight forward
         const forwardSpeed = 0.7;
-        const motors = movementToMotors(forwardSpeed, 0, 0);
-        motor1 = motors.motor1;
-        motor2 = motors.motor2;
-        motor3 = motors.motor3;
-        motor4 = motors.motor4;
+        motor1 = forwardSpeed;
+        motor2 = forwardSpeed;
+        motor3 = forwardSpeed;
+        motor4 = forwardSpeed;
       }
     } else {
       // Goal not visible - move forward in current direction (should become visible soon with 360 camera)
       const forwardSpeed = 0.6;
-      const motors = movementToMotors(forwardSpeed, 0, 0);
-      motor1 = motors.motor1;
-      motor2 = motors.motor2;
-      motor3 = motors.motor3;
-      motor4 = motors.motor4;
+      motor1 = forwardSpeed;
+      motor2 = forwardSpeed;
+      motor3 = forwardSpeed;
+      motor4 = forwardSpeed;
     }
     
     return returnAction();
@@ -396,12 +394,26 @@ function strategy(worldState) {
       const forwardSpeed = reverseDirection.y * BACKOFF_MOTOR_VALUE;
       const strafeSpeed = reverseDirection.x * BACKOFF_MOTOR_VALUE * 0.7;
       
-      // Use omni wheel movement to reverse in the opposite direction
-      const motors = movementToMotors(forwardSpeed, strafeSpeed, 0);
-      motor1 = motors.motor1;
-      motor2 = motors.motor2;
-      motor3 = motors.motor3;
-      motor4 = motors.motor4;
+      // Reset motors first
+      motor1 = 0;
+      motor2 = 0;
+      motor3 = 0;
+      motor4 = 0;
+      
+      // Apply strafe (sideways) movement if needed
+      if (Math_abs(strafeSpeed) > 0.1) {
+        motor1 = strafeSpeed;
+        motor2 = -strafeSpeed;
+        motor3 = strafeSpeed;
+        motor4 = -strafeSpeed;
+      }
+      // Apply forward/backward movement if needed
+      if (Math_abs(forwardSpeed) > 0.1) {
+        motor1 += forwardSpeed;
+        motor2 += forwardSpeed;
+        motor3 += forwardSpeed;
+        motor4 += forwardSpeed;
+      }
       
       // CRITICAL: ALL line detection logic is disabled while reversing
     return returnAction();
@@ -413,6 +425,9 @@ function strategy(worldState) {
   // Skip if line detection is disabled
   // ============================================================
   if (!ignoreLineDetection) {
+    // #region agent log
+    fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'defender.js:377',message:'Line detection check',data:{currentState,ignoreLineDetection,lineFront:line_front,lineLeft:line_left,lineRight:line_right,lineRear:line_rear},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'AM'})}).catch(()=>{});
+    // #endregion
     // Calculate current movement direction based on ball or goal
     var currentDirection = { x: 0, y: 1 }; // Default: forward
     if (ball.visible) {
@@ -500,6 +515,9 @@ function strategy(worldState) {
         // TEST MODE: Disabled - stay in DEFENDING
         // currentState = STATE.UNCROSSING_LINE;
         
+        // #region agent log
+        fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'defender.js:441',message:'Line detected, transitioning to UNCROSSING_LINE',data:{sensorName:sensor.name,previousState,newState:currentState,reverseDirection,ignoreLineDetection},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'AH'})}).catch(()=>{});
+        // #endregion
         
         // Record uncrossing event (only once when entering this state)
         resetEvents.push({ time: t_ms, type: 'uncrossing' });
@@ -511,12 +529,18 @@ function strategy(worldState) {
         const forwardSpeed = reverseDirection.y * BACKOFF_MOTOR_VALUE;
         const strafeSpeed = reverseDirection.x * BACKOFF_MOTOR_VALUE * 0.7;
         
-        // Use omni wheel movement to reverse in the opposite direction
-        const motors = movementToMotors(forwardSpeed, strafeSpeed, 0);
-        motor1 = motors.motor1;
-        motor2 = motors.motor2;
-        motor3 = motors.motor3;
-        motor4 = motors.motor4;
+        if (Math_abs(strafeSpeed) > 0.1) {
+          motor1 = strafeSpeed;
+          motor2 = -strafeSpeed;
+          motor3 = strafeSpeed;
+          motor4 = -strafeSpeed;
+        }
+        if (Math_abs(forwardSpeed) > 0.1) {
+          motor1 += forwardSpeed;
+          motor2 += forwardSpeed;
+          motor3 += forwardSpeed;
+          motor4 += forwardSpeed;
+        }
         
         return returnAction();
       }
@@ -552,21 +576,26 @@ function strategy(worldState) {
     } else {
       // Still stuck - handle stuck behavior
       if (stuck || bumper_front) {
-        const motors = movementToMotors(-0.6, 0, 0);
-        motor1 = motors.motor1;
-        motor2 = motors.motor2;
-        motor3 = motors.motor3;
-        motor4 = motors.motor4;
+        motor1 = -0.6;
+        motor2 = -0.6;
+        motor3 = -0.6;
+        motor4 = -0.6;
         return returnAction();
       }
       
       if (bumper_left) {
-        turn(0.5);
+        motor1 = -0.3;
+        motor2 = 0.3;
+        motor3 = 0.3;
+        motor4 = -0.3;
         return returnAction();
       }
       
       if (bumper_right) {
-        turn(-0.5);
+        motor1 = 0.3;
+        motor2 = -0.3;
+        motor3 = -0.3;
+        motor4 = 0.3;
     return returnAction();
       }
     }
@@ -606,21 +635,26 @@ function strategy(worldState) {
     }
     
   if (stuck || bumper_front) {
-    const motors = movementToMotors(-0.6, 0, 0);
-    motor1 = motors.motor1;
-    motor2 = motors.motor2;
-    motor3 = motors.motor3;
-    motor4 = motors.motor4;
+    motor1 = -0.6;
+    motor2 = -0.6;
+    motor3 = -0.6;
+    motor4 = -0.6;
     return returnAction();
   }
   
   if (bumper_left) {
-    turn(0.5);
+    motor1 = -0.3;
+    motor2 = 0.3;
+    motor3 = 0.3;
+    motor4 = -0.3;
     return returnAction();
   }
   
   if (bumper_right) {
-    turn(-0.5);
+    motor1 = 0.3;
+    motor2 = -0.3;
+    motor3 = -0.3;
+    motor4 = 0.3;
     return returnAction();
     }
   }
@@ -630,6 +664,11 @@ function strategy(worldState) {
   // But it ensures line detection is enabled for the next frame
   if (currentState !== STATE.UNCROSSING_LINE && currentState !== STATE.STUCK && currentState !== STATE.RESET_POSITION) {
     ignoreLineDetection = false;
+    // #region agent log
+    if (currentState === STATE.DEFENDING || currentState === STATE.DEFLECTING) {
+      fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'defender.js:597',message:'Line detection enabled for next frame',data:{currentState,ignoreLineDetection},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'AP'})}).catch(()=>{});
+    }
+    // #endregion
   }
   
   // ============================================================
@@ -655,31 +694,31 @@ function strategy(worldState) {
     
       // If too far from goal, move back
     if (ownGoal.visible && ownGoal.distance > MAX_DISTANCE_FROM_GOAL) {
+      // #region agent log
+      fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'defender.js:545',message:'SEARCHING too far from goal, backing up',data:{distanceFromGoal:ownGoal.distance,MAX_DISTANCE_FROM_GOAL},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H'})}).catch(()=>{});
+      // #endregion
       if (Math_abs(ownGoal.angle_deg) > 25) {
-        const turnSpeed = clamp(ownGoal.angle_deg / 50, -1, 1) * 0.5;
-        const backSpeed = -0.5; // Back up while turning
-        const motors = movementToMotors(backSpeed, 0, turnSpeed);
-        motor1 = motors.motor1;
-        motor2 = motors.motor2;
-        motor3 = motors.motor3;
-        motor4 = motors.motor4;
+        const turn = clamp(ownGoal.angle_deg / 50, -1, 1) * 0.5;
+        motor1 = -turn - 0.5; // Back up while turning
+        motor4 = -turn - 0.5;
+        motor2 = turn - 0.5;
+        motor3 = turn - 0.5;
       } else {
-        const motors = movementToMotors(-0.6, 0, 0); // Back up straight
-        motor1 = motors.motor1;
-        motor2 = motors.motor2;
-        motor3 = motors.motor3;
-        motor4 = motors.motor4;
+        motor1 = -0.6; // Back up straight
+        motor2 = -0.6;
+        motor3 = -0.6;
+        motor4 = -0.6;
       }
     } else {
         // Search for ball: turn in place or move backward slightly, never forward
       const searchDirection = (Math_floor(searchTime / 1500) % 2 === 0) ? 1 : -1;
         const turnSpeed = 0.4 * searchDirection;
         const backSpeed = -0.1; // Small backward movement to stay within bounds
-        const motors = movementToMotors(backSpeed, 0, turnSpeed);
-        motor1 = motors.motor1;
-        motor2 = motors.motor2;
-        motor3 = motors.motor3;
-        motor4 = motors.motor4;
+        
+        motor1 = backSpeed - turnSpeed;
+        motor4 = backSpeed - turnSpeed;
+        motor2 = backSpeed + turnSpeed;
+        motor3 = backSpeed + turnSpeed;
     }
       return returnAction();
     } else {
@@ -696,6 +735,9 @@ function strategy(worldState) {
   // Defensive check: Don't allow DEFENDING if RESET_POSITION is active and not complete
   // TEST MODE: Disabled - always allow DEFENDING
   if (false && currentState === STATE.RESET_POSITION) {
+    // #region agent log
+    fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'defender.js:651',message:'DEFENDING blocked - RESET_POSITION still active',data:{resetDistanceMoved},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'BG'})}).catch(()=>{});
+    // #endregion
     // RESET_POSITION should have been handled earlier, but if we somehow reach here, 
     // don't allow DEFENDING to execute - RESET_POSITION must complete first
     return returnAction();
@@ -716,6 +758,9 @@ function strategy(worldState) {
     // Check if ball is close - transition to DEFLECTING if ball is within 40cm
     // TEST MODE: DISABLED - Stay in DEFENDING
     if (false && ball.visible && ball.distance < 40) {
+      // #region agent log
+      fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'defender.js:647',message:'DEFENDING transitioning to DEFLECTING (ball close)',data:{ballDist:ball.distance,distanceFromGoal},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'M'})}).catch(()=>{});
+      // #endregion
       // TEST MODE: Disabled - stay in DEFENDING
       // currentState = STATE.DEFLECTING;
       return returnAction();
@@ -723,10 +768,16 @@ function strategy(worldState) {
     
     // DEFENDING: Stay within 40cm half circle around own goal, orient towards ball to block it
     
+    // #region agent log
+    fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'defender.js:704',message:'DEFENDING state check',data:{distanceFromGoal,MAX_DISTANCE_FROM_GOAL,ballVisible:ball.visible,ownGoalVisible:ownGoal.visible,ballDist:ball.visible ? ball.distance : null,willDoArcPositioning:distanceFromGoal <= MAX_DISTANCE_FROM_GOAL && ball.visible && ownGoal.visible},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'CF'})}).catch(()=>{});
+    // #endregion
     
     // If too far from goal (>60cm), move toward it (not backward, but toward the goal)
     // Use 60cm threshold to allow arc positioning to activate when closer
     if (distanceFromGoal > 60) {
+      // #region agent log
+      fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'defender.js:712',message:'DEFENDING too far from goal (>60cm), moving toward goal',data:{distanceFromGoal,MAX_DISTANCE_FROM_GOAL,ownGoalVisible:ownGoal.visible,goalAngle:ownGoal.visible ? ownGoal.angle_deg : null,lineFront:line_front,lineLeft:line_left,lineRight:line_right,lineRear:line_rear},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'CM'})}).catch(()=>{});
+      // #endregion
       // Too far from goal - move toward it (forward if goal is in front, backward if goal is behind)
       if (ownGoal.visible) {
         const goalAngle = ownGoal.angle_deg;
@@ -737,33 +788,33 @@ function strategy(worldState) {
           // This helps us get into a better position relative to the goal
           const turnSpeed = clamp(goalAngle / 60, -1, 1) * 0.6;
           const forwardSpeed = 0.3; // Move forward to reposition
-          const motors = movementToMotors(forwardSpeed, 0, turnSpeed);
-          motor1 = motors.motor1;
-          motor2 = motors.motor2;
-          motor3 = motors.motor3;
-          motor4 = motors.motor4;
+          motor1 = forwardSpeed - turnSpeed;
+          motor4 = forwardSpeed - turnSpeed;
+          motor2 = forwardSpeed + turnSpeed;
+          motor3 = forwardSpeed + turnSpeed;
         } else if (absGoalAngle > 20) {
           // Goal is to the side - turn toward goal while moving forward
-          const turnSpeed = clamp(goalAngle / 40, -1, 1) * 0.6;
+          const turn = clamp(goalAngle / 40, -1, 1) * 0.6;
           const forwardSpeed = 0.5; // Move forward toward goal
-          const motors = movementToMotors(forwardSpeed, 0, turnSpeed);
-          motor1 = motors.motor1;
-          motor2 = motors.motor2;
-          motor3 = motors.motor3;
-          motor4 = motors.motor4;
+          motor1 = forwardSpeed - turn;
+          motor4 = forwardSpeed - turn;
+          motor2 = forwardSpeed + turn;
+          motor3 = forwardSpeed + turn;
         } else {
           // Facing goal - move forward straight toward it
           const forwardSpeed = 0.6;
-          const motors = movementToMotors(forwardSpeed, 0, 0);
-          motor1 = motors.motor1;
-          motor2 = motors.motor2;
-          motor3 = motors.motor3;
-          motor4 = motors.motor4;
+          motor1 = forwardSpeed;
+          motor2 = forwardSpeed;
+          motor3 = forwardSpeed;
+          motor4 = forwardSpeed;
         }
       } else {
         // Goal not visible - turn and search
         const turnSpeed = 0.4;
-        turn(turnSpeed);
+        motor1 = -turnSpeed;
+        motor4 = -turnSpeed;
+        motor2 = turnSpeed;
+        motor3 = turnSpeed;
       }
       return returnAction();
     }
@@ -776,6 +827,9 @@ function strategy(worldState) {
       const goalAngle = ownGoal.angle_deg;
       const opponentGoalAngle = opponentGoal.visible ? opponentGoal.angle_deg : null;
       
+      // #region agent log
+      fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'defender.js:757',message:'DEFENDING strafe along goal',data:{ballAngle,ballDist,distanceFromGoal,goalAngle,opponentGoalAngle,opponentGoalVisible:opponentGoal.visible},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'CP'})}).catch(()=>{});
+      // #endregion
       
       const desiredDistance = MAX_DISTANCE_FROM_GOAL; // Stay on the arc (40cm from goal)
       const distanceError = distanceFromGoal - desiredDistance;
@@ -786,6 +840,9 @@ function strategy(worldState) {
       while (goalToBallAngle > 180) goalToBallAngle -= 360;
       while (goalToBallAngle < -180) goalToBallAngle += 360;
       
+      // #region agent log
+      fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'defender.js:806',message:'DEFENDING calculating angles',data:{ballAngle,goalAngle,goalToBallAngle,distanceFromGoal,desiredDistance:MAX_DISTANCE_FROM_GOAL,distanceError},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A,B,C'})}).catch(()=>{});
+      // #endregion
       
       // Strafe direction: positive = right, negative = left
       // If ball is to the right of goal, strafe right; if left, strafe left
@@ -798,6 +855,9 @@ function strategy(worldState) {
         turnToOpponent = clamp(opponentGoalAngle / 50, -1, 1) * 0.6;
       }
       
+      // #region agent log
+      fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'defender.js:775',message:'DEFENDING strafe calculation',data:{goalToBallAngle,strafeSpeed,strafeDirection,turnToOpponent,distanceError,absDistanceError:Math_abs(distanceError),distanceFromGoal,desiredDistance},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'CQ'})}).catch(()=>{});
+      // #endregion
       
       // Adjust distance if needed
       if (Math_abs(distanceError) > 10) {
@@ -852,6 +912,9 @@ function strategy(worldState) {
       }
     }
         
+        // #region agent log
+        fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'defender.js:831',message:'DEFENDING adjusting distance',data:{distanceError,goalAngle,motor1,motor2,motor3,motor4},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C,D'})}).catch(()=>{});
+        // #endregion
       } else {
         // At correct distance - strafe left/right along goal while facing opponent
         // With omni wheels, we can truly strafe sideways!
@@ -893,6 +956,9 @@ function strategy(worldState) {
         motor3 = arcMotors.motor3;
         motor4 = arcMotors.motor4;
         
+        // #region agent log
+        fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'defender.js:912',message:'DEFENDING strafing along goal with omni wheels',data:{goalToBallAngle,clampedGoalToBallAngle,strafeSpeed,strafeDirection,turnToOpponentGoal,motor1,motor2,motor3,motor4,allZero:motor1===0&&motor2===0&&motor3===0&&motor4===0},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A,B,D'})}).catch(()=>{});
+        // #endregion
       }
       
       return returnAction();
@@ -916,6 +982,9 @@ function strategy(worldState) {
   // Defensive check: Don't allow DEFLECTING if RESET_POSITION is active and not complete
   // TEST MODE: Disabled - always allow DEFENDING
   if (false && currentState === STATE.RESET_POSITION) {
+    // #region agent log
+    fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'defender.js:760',message:'DEFLECTING blocked - RESET_POSITION still active',data:{resetDistanceMoved},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'BH'})}).catch(()=>{});
+    // #endregion
     // RESET_POSITION should have been handled earlier, but if we somehow reach here,
     // don't allow DEFLECTING to execute - RESET_POSITION must complete first
     return returnAction();
@@ -925,6 +994,9 @@ function strategy(worldState) {
     // Set target for display
     currentTarget = 'ball';
     
+    // #region agent log
+    fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'defender.js:744',message:'DEFLECTING state active',data:{currentState,ballVisible:ball.visible,ballDist:ball.visible ? ball.distance : null,ownGoalVisible:ownGoal.visible,ownGoalDist:ownGoal.visible ? ownGoal.distance : null,lineFront:line_front,lineLeft:line_left,lineRight:line_right,lineRear:line_rear,ignoreLineDetection},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'AI'})}).catch(()=>{});
+    // #endregion
     
     const distanceFromGoal = ownGoal.visible ? ownGoal.distance : 999;
     const ballAngle = ball.angle_deg;
@@ -935,24 +1007,29 @@ function strategy(worldState) {
     
     // If ball lost or too far, transition back to DEFENDING
     if (!ball.visible || ballDist > 70) {
+      // #region agent log
+      fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'defender.js:748',message:'DEFLECTING exiting to DEFENDING',data:{ballVisible:ball.visible,ballDist:ball.visible ? ball.distance : null,exitReason:!ball.visible ? 'ballLost' : 'ballTooFar'},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'K'})}).catch(()=>{});
+      // #endregion
       currentState = STATE.DEFENDING;
       return returnAction();
     }
     
     // If too far from goal (>100cm), move back toward goal while deflecting
     if (distanceFromGoal > MAX_DEFLECTING_DISTANCE && ownGoal.visible) {
+      // #region agent log
+      fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'defender.js:787',message:'DEFLECTING too far from goal, backing up',data:{distanceFromGoal,MAX_DEFLECTING_DISTANCE,ballAngle,ballDist},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'AN'})}).catch(()=>{});
+      // #endregion
       const goalAngle = ownGoal.angle_deg;
       // Move backward to return to goal area
       const backSpeed = -0.5;
       
       if (Math_abs(ballAngle) > 25) {
         // Turn toward ball while backing up
-        const turnSpeed = clamp(ballAngle / 40, -1, 1) * 0.3;
-        const motors = movementToMotors(backSpeed, 0, turnSpeed);
-        motor1 = motors.motor1;
-        motor2 = motors.motor2;
-        motor3 = motors.motor3;
-        motor4 = motors.motor4;
+        const turn = clamp(ballAngle / 40, -1, 1) * 0.3;
+        motor1 = backSpeed - turn;
+        motor4 = backSpeed - turn;
+        motor2 = backSpeed + turn;
+        motor3 = backSpeed + turn;
       } else {
         // Ball in front - deflect while backing up
         let pushAngle = ballAngle;
@@ -961,11 +1038,10 @@ function strategy(worldState) {
           pushAngle = ballAngle * 0.3 + opponentGoalAngle * 0.7;
         }
         const steer = clamp(pushAngle / 50, -0.15, 0.15);
-        const motors = movementToMotors(backSpeed, 0, steer);
-        motor1 = motors.motor1;
-        motor2 = motors.motor2;
-        motor3 = motors.motor3;
-        motor4 = motors.motor4;
+        motor1 = backSpeed - steer;
+        motor4 = backSpeed - steer;
+        motor2 = backSpeed + steer;
+        motor3 = backSpeed + steer;
         
         // Kick when very close to ball
         if (ballDist < 15) {
@@ -978,16 +1054,18 @@ function strategy(worldState) {
     // Within 100cm - push ball toward opponent goal
     const opponentGoalAngle = opponentGoal.visible ? opponentGoal.angle_deg : null;
     
+    // #region agent log
+    fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'defender.js:822',message:'DEFLECTING approaching ball',data:{ballAngle,ballDist,distanceFromGoal,absBallAngle:Math_abs(ballAngle),opponentGoalVisible:opponentGoal.visible,opponentGoalAngle},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'AO'})}).catch(()=>{});
+    // #endregion
     
     if (Math_abs(ballAngle) > 25) {
       // Turn toward ball AND move forward to approach it
-      const turnSpeed = clamp(ballAngle / 40, -1, 1) * 0.6;
+      const turn = clamp(ballAngle / 40, -1, 1) * 0.6;
       const forwardSpeed = 0.4; // Move forward while turning
-      const motors = movementToMotors(forwardSpeed, 0, turnSpeed);
-      motor1 = motors.motor1;
-      motor2 = motors.motor2;
-      motor3 = motors.motor3;
-      motor4 = motors.motor4;
+      motor1 = forwardSpeed - turn;
+      motor4 = forwardSpeed - turn;
+      motor2 = forwardSpeed + turn;
+      motor3 = forwardSpeed + turn;
     } else {
       // Ball is in front - push it toward opponent goal
       let pushAngle = ballAngle;
@@ -1000,16 +1078,18 @@ function strategy(worldState) {
       const forwardSpeed = 0.5;
       const steer = clamp(pushAngle / 50, -0.3, 0.3);
       
-      const motors = movementToMotors(forwardSpeed, 0, steer);
-      motor1 = motors.motor1;
-      motor2 = motors.motor2;
-      motor3 = motors.motor3;
-      motor4 = motors.motor4;
+      motor1 = forwardSpeed - steer;
+      motor4 = forwardSpeed - steer;
+      motor2 = forwardSpeed + steer;
+      motor3 = forwardSpeed + steer;
       
       // Kick when ball is close enough
       if (ballDist < 20) {
         kick = true;
         // After kicking, return to DEFENDING
+        // #region agent log
+        fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'defender.js:850',message:'DEFLECTING kicked, returning to DEFENDING',data:{ballDist,distanceFromGoal},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'L'})}).catch(()=>{});
+        // #endregion
         currentState = STATE.DEFENDING;
       }
     }
@@ -1019,13 +1099,21 @@ function strategy(worldState) {
   
   // Ensure state is always valid - if somehow invalid, reset to DEFENDING
   if (!Object.values(STATE).includes(currentState)) {
+    // #region agent log
+    fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'defender.js:861',message:'Invalid state detected, resetting to DEFENDING',data:{invalidState:currentState,validStates:Object.values(STATE)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'AG'})}).catch(()=>{});
+    // #endregion
     currentState = STATE.DEFENDING;
   }
   
+  // #region agent log
+  fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'defender.js:1076',message:'DEFENDER final return',data:{currentState,motor1,motor2,motor3,motor4,kick,allZero:motor1===0&&motor2===0&&motor3===0&&motor4===0},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A,B,C,D,E'})}).catch(()=>{});
+  // #endregion
   
-  // returnAction() now handles the fallback internally
   return returnAction();
   } catch (error) {
+    // #region agent log
+    fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'defender.js:867',message:'Strategy error caught, defaulting to DEFENDING',data:{errorMessage:error instanceof Error ? error.message : String(error),currentState},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'AL'})}).catch(()=>{});
+    // #endregion
     // On any error, ensure we return a valid state (DEFENDING) instead of undefined
     currentState = STATE.DEFENDING;
     const result = { motor1: 0, motor2: 0, motor3: 0, motor4: 0, kick: false };

@@ -14,7 +14,7 @@ import { WorldView } from './components/WorldView';
 
 // Strategy file paths - using dynamic imports
 // These will be updated by Vite HMR automatically
-import attackerStrategyRaw from './strategies/attacker.js?raw';
+import attackerStrategyRaw from './strategies/attacker_simple.js?raw';
 import defenderStrategyRaw from './strategies/defender.js?raw';
 
 // Function to get current strategy content (will reflect HMR updates)

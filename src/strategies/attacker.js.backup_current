@@ -100,6 +100,9 @@ var distanceMovedToGoal = 0; // Track distance moved towards own goal
 const GOAL_ADVANCE_DISTANCE_CM = 50; // Move 50cm towards own goal
 
 function strategy(worldState) {
+  // #region agent log
+  fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'attacker.js:99',message:'STRATEGY ENTRY',data:{ballVisible:worldState.ball.visible,currentState,we_are_blue:worldState.we_are_blue},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A,B,C,D,E'})}).catch(()=>{});
+  // #endregion
   
   const { ball, goal_blue, goal_yellow, we_are_blue, bumper_front, bumper_left, bumper_right, 
           line_front, line_left, line_right, line_rear, stuck, t_ms, dt_s, heading_deg } = worldState;
@@ -703,6 +706,9 @@ function strategy(worldState) {
   
   // Step 1: Rotate to face the ball (if significantly misaligned)
   if (Math_abs(ballAngle) > (isRotatingToBall ? ROTATE_THRESHOLD_STOP : ROTATE_THRESHOLD_START)) {
+    // #region agent log
+    fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'attacker.js:701',message:'Rotating to ball',data:{ballAngle,ballDist,heading_deg,currentState,isRotatingToBall},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'F'})}).catch(()=>{});
+    // #endregion
     
     isRotatingToBall = true; // Mark that we're rotating
     
@@ -723,6 +729,9 @@ function strategy(worldState) {
   
   // Step 2: Drive forward toward ball (aligned, within threshold)
   if (ballDist > 15) {
+    // #region agent log
+    fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'attacker.js:725',message:'Moving forward to ball',data:{ballAngle,ballDist,heading_deg,currentState,isRotatingToBall},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'F'})}).catch(()=>{});
+    // #endregion
     
     isRotatingToBall = false; // Mark that we're moving forward
     
@@ -794,6 +803,9 @@ function strategy(worldState) {
                         (motor3 === 0 || isNaN(motor3)) && 
                         (motor4 === 0 || isNaN(motor4));
   
+  // #region agent log
+  fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'attacker.js:789',message:'Fallback check',data:{currentState,motor1,motor2,motor3,motor4,allMotorsZero},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+  // #endregion
   
   if (allMotorsZero) {
     // Default search movement - always move forward while turning
@@ -806,6 +818,9 @@ function strategy(worldState) {
     motor3 = motors.motor3;
     motor4 = motors.motor4;
     
+    // #region agent log
+    fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'attacker.js:801',message:'Fallback applied',data:{motor1,motor2,motor3,motor4,forwardSpeed,turnSpeed},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+    // #endregion
   }
   
   // Ensure all motors are valid numbers
@@ -814,6 +829,9 @@ function strategy(worldState) {
   motor3 = isNaN(motor3) ? 0 : motor3;
   motor4 = isNaN(motor4) ? 0 : motor4;
   
+  // #region agent log
+  fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'attacker.js:808',message:'STRATEGY EXIT',data:{currentState,motor1,motor2,motor3,motor4,kick,allZero:motor1===0&&motor2===0&&motor3===0&&motor4===0},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A,B,C,D,E'})}).catch(()=>{});
+  // #endregion
   
   return { motor1, motor2, motor3, motor4, kick };
 }

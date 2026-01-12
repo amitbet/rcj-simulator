@@ -9,24 +9,29 @@
     "preview": "vite preview",
     "electron": "electron .",
     "electron:dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",
-    "start": "vite"
+    "start": "vite",
+    "test:rectangle": "node -r ts-node/register test_rectangle_headless.js",
+    "test:rectangle:loop": "node test_runner.js",
+    "test:movement": "node -r ts-node/register test_movement_comprehensive.js",
+    "test:attacker": "node -r ts-node/register test_attacker_simple.js"
   },
   "dependencies": {
+    "@monaco-editor/react": "^4.6.0",
     "matter-js": "^0.19.0",
-    "three": "^0.160.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "@monaco-editor/react": "^4.6.0"
+    "three": "^0.160.0"
   },
   "devDependencies": {
     "@types/matter-js": "^0.19.6",
-    "@types/node": "^20.10.0",
+    "@types/node": "^20.19.28",
     "@types/react": "^18.2.0",
     "@types/react-dom": "^18.2.0",
     "@types/three": "^0.160.0",
     "@vitejs/plugin-react": "^4.2.0",
     "concurrently": "^8.2.0",
     "electron": "^28.0.0",
+    "ts-node": "^10.9.2",
     "typescript": "^5.3.0",
     "vite": "^5.0.0",
     "wait-on": "^7.2.0"
@@ -34,4 +39,3 @@
   "author": "",
   "license": "MIT"
 }
-

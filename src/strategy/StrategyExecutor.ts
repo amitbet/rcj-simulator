@@ -101,8 +101,10 @@ export class StrategyExecutor {
       // Execute with timeout protection (simple version)
       const result = strategyFunc(worldState);
       
+      
       // Validate action
       const action = this.validateAction(result);
+      
       
       // Extract state and target from result if they were attached
       const state = (result as any)._state;
