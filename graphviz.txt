@@ -1,0 +1,125 @@
+digraph RoboCupRobot {
+  rankdir=LR;
+  splines=ortho;
+  nodesep=0.7;
+  ranksep=1.0;
+  fontname="Helvetica";
+
+  node [shape=box, style="rounded", fontname="Helvetica", fontsize=11];
+  edge [fontname="Helvetica", fontsize=10];
+
+  // =========================
+  // COLOR LEGEND
+  // =========================
+  // Red    = Battery / 12V
+  // Orange = 5V power
+  // Blue   = 3.3V power
+  // Green  = I2C / SPI logic
+  // Purple = Motor control logic
+  // Brown  = Motor power
+  // Teal   = Kicker control
+  // Black  = Ground
+
+  // =========================
+  // POWER
+  // =========================
+  subgraph cluster_power {
+    label="POWER";
+    color="#b45f06";
+
+    battery [label="3S LiPo\n11.4–12.6V"];
+    buck5   [label="Buck Converter\n11.4V → 5V (≥3A)"];
+
+    battery -> buck5 [label="12V", color=red, penwidth=2];
+  }
+
+  // =========================
+  // CONTROLLER & SENSORS
+  // =========================
+  subgraph cluster_logic {
+    label="CONTROLLER & SENSORS";
+    color="#38761d";
+
+    teensy [label="Teensy 4.1\nLogic: 3.3V"];
+    pixy   [label="Pixy2 Camera\nPower: 5V"];
+    imu    [label="BNO055 IMU\nPower: 3.3V"];
+
+    buck5  -> teensy [label="5V (VIN)", color=orange, penwidth=2];
+    buck5  -> pixy   [label="5V", color=orange, penwidth=2];
+
+    teensy -> imu    [label="3.3V", color=blue, penwidth=2];
+
+    i2c [shape=ellipse, label="I2C"];
+    spi [shape=ellipse, label="SPI"];
+
+    teensy -> i2c [label="SDA/SCL", color=green, penwidth=2];
+    i2c -> imu    [label="I2C", color=green, penwidth=2];
+
+    teensy -> spi [label="MOSI/MISO/SCK/CS", color=green, penwidth=2];
+    spi -> pixy   [label="SPI", color=green, penwidth=2];
+  }
+
+  // =========================
+  // MOTORS & DRIVERS
+  // =========================
+  subgraph cluster_motors {
+    label="MOTORS & DRIVERS";
+    color="#990000";
+
+    driver1 [label="Dual Motor Driver #1\nTB9051FTG\n(Alt: L298N, TB6612FNG, VNH2SP30)"];
+    driver2 [label="Dual Motor Driver #2\nTB9051FTG\n(Alt: L298N, TB6612FNG, VNH2SP30)"];
+
+    m1 [label="Motor 1\n20DX43L-CB"];
+    m2 [label="Motor 2\n20DX43L-CB"];
+    m3 [label="Motor 3\n20DX43L-CB"];
+    m4 [label="Motor 4\n20DX43L-CB"];
+
+    driver1 -> m1 [label="OUT A", color=brown, penwidth=2];
+    driver1 -> m2 [label="OUT B", color=brown, penwidth=2];
+    driver2 -> m3 [label="OUT A", color=brown, penwidth=2];
+    driver2 -> m4 [label="OUT B", color=brown, penwidth=2];
+  }
+
+  battery -> driver1 [label="12V", color=red, penwidth=2];
+  battery -> driver2 [label="12V", color=red, penwidth=2];
+
+  teensy -> driver1 [label="PWM / DIR", color=purple, penwidth=2];
+  teensy -> driver2 [label="PWM / DIR", color=purple, penwidth=2];
+
+  // =========================
+  // KICKER
+  // =========================
+  subgraph cluster_kicker {
+    label="KICKER SYSTEM";
+    color="#0b5394";
+
+    solenoid [label="Solenoid Kicker\n1264B, 12V, 20mm"];
+    mosfet   [label="Logic-Level N-MOSFET"];
+    diode    [label="Flyback Diode"];
+    cap      [label="470–1000µF Cap"];
+    fuse     [label="3–5A Fuse"];
+
+    battery -> fuse     [label="12V", color=red, penwidth=2];
+    fuse    -> solenoid [label="12V", color=red, penwidth=2];
+    solenoid -> mosfet  [label="Drain", color=red, penwidth=1.5];
+
+    teensy -> mosfet    [label="KICK GPIO", color=teal, penwidth=2];
+    diode  -> solenoid  [style=dashed, color=gray];
+    battery -> cap      [label="12V", color=red, penwidth=1.5];
+  }
+
+  // =========================
+  // COMMON GROUND
+  // =========================
+  gnd [shape=ellipse, style="filled", fillcolor="#d0e0e3", label="COMMON GND"];
+
+  battery -> gnd [dir=none, color=black];
+  buck5   -> gnd [dir=none, color=black];
+  teensy  -> gnd [dir=none, color=black];
+  pixy    -> gnd [dir=none, color=black];
+  imu     -> gnd [dir=none, color=black];
+  driver1 -> gnd [dir=none, color=black];
+  driver2 -> gnd [dir=none, color=black];
+  mosfet  -> gnd [dir=none, color=black];
+  cap     -> gnd [dir=none, color=black];
+}
