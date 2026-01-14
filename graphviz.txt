@@ -11,13 +11,13 @@ digraph RoboCupRobot {
   // =========================
   // COLOR LEGEND
   // =========================
-  // Red    = Battery / 12V
-  // Orange = 5V power
-  // Blue   = 3.3V power
-  // Green  = I2C / SPI logic
-  // Purple = Motor control logic
-  // Brown  = Motor power
-  // Teal   = Kicker control
+  // Red    = Battery / 12V (AWG 18)
+  // Orange = 5V power (AWG 18)
+  // Blue   = 3.3V power (AWG 24)
+  // Green  = I2C / SPI logic (AWG 24)
+  // Purple = Motor control logic (AWG 24)
+  // Brown  = Motor power (AWG 20)
+  // Teal   = Kicker control (AWG 24)
   // Black  = Ground
 
   // =========================
@@ -30,7 +30,7 @@ digraph RoboCupRobot {
     battery [label="3S LiPo\n11.4–12.6V"];
     buck5   [label="Buck Converter\n11.4V → 5V (≥3A)"];
 
-    battery -> buck5 [label="12V", color=red, penwidth=2];
+    battery -> buck5 [label="12V • AWG 18", color=red, penwidth=2];
   }
 
   // =========================
@@ -44,19 +44,19 @@ digraph RoboCupRobot {
     pixy   [label="Pixy2 Camera\nPower: 5V"];
     imu    [label="BNO055 IMU\nPower: 3.3V"];
 
-    buck5  -> teensy [label="5V (VIN)", color=orange, penwidth=2];
-    buck5  -> pixy   [label="5V", color=orange, penwidth=2];
+    buck5  -> teensy [label="5V • AWG 18", color=orange, penwidth=2];
+    buck5  -> pixy   [label="5V • AWG 18", color=orange, penwidth=2];
 
-    teensy -> imu    [label="3.3V", color=blue, penwidth=2];
+    teensy -> imu    [label="3.3V • AWG 24", color=blue, penwidth=2];
 
     i2c [shape=ellipse, label="I2C"];
     spi [shape=ellipse, label="SPI"];
 
-    teensy -> i2c [label="SDA/SCL", color=green, penwidth=2];
-    i2c -> imu    [label="I2C", color=green, penwidth=2];
+    teensy -> i2c [label="SDA/SCL • AWG 24", color=green, penwidth=2];
+    i2c -> imu    [label="I2C • AWG 24", color=green, penwidth=2];
 
-    teensy -> spi [label="MOSI/MISO/SCK/CS", color=green, penwidth=2];
-    spi -> pixy   [label="SPI", color=green, penwidth=2];
+    teensy -> spi [label="SPI • AWG 24", color=green, penwidth=2];
+    spi -> pixy   [label="SPI • AWG 24", color=green, penwidth=2];
   }
 
   // =========================
@@ -66,25 +66,25 @@ digraph RoboCupRobot {
     label="MOTORS & DRIVERS";
     color="#990000";
 
-    driver1 [label="Dual Motor Driver #1\nTB9051FTG\n(Alt: L298N, TB6612FNG, VNH2SP30)"];
-    driver2 [label="Dual Motor Driver #2\nTB9051FTG\n(Alt: L298N, TB6612FNG, VNH2SP30)"];
+    driver1 [label="Dual Motor Driver #1\n(TB9051FTG)\nAlt: L298N / TB6612FNG"];
+    driver2 [label="Dual Motor Driver #2\n(TB9051FTG)\nAlt: L298N / TB6612FNG"];
 
     m1 [label="Motor 1\n20DX43L-CB"];
     m2 [label="Motor 2\n20DX43L-CB"];
     m3 [label="Motor 3\n20DX43L-CB"];
     m4 [label="Motor 4\n20DX43L-CB"];
 
-    driver1 -> m1 [label="OUT A", color=brown, penwidth=2];
-    driver1 -> m2 [label="OUT B", color=brown, penwidth=2];
-    driver2 -> m3 [label="OUT A", color=brown, penwidth=2];
-    driver2 -> m4 [label="OUT B", color=brown, penwidth=2];
+    driver1 -> m1 [label="OUT A • AWG 20", color=brown, penwidth=2];
+    driver1 -> m2 [label="OUT B • AWG 20", color=brown, penwidth=2];
+    driver2 -> m3 [label="OUT A • AWG 20", color=brown, penwidth=2];
+    driver2 -> m4 [label="OUT B • AWG 20", color=brown, penwidth=2];
   }
 
-  battery -> driver1 [label="12V", color=red, penwidth=2];
-  battery -> driver2 [label="12V", color=red, penwidth=2];
+  battery -> driver1 [label="12V • AWG 18", color=red, penwidth=2];
+  battery -> driver2 [label="12V • AWG 18", color=red, penwidth=2];
 
-  teensy -> driver1 [label="PWM / DIR", color=purple, penwidth=2];
-  teensy -> driver2 [label="PWM / DIR", color=purple, penwidth=2];
+  teensy -> driver1 [label="PWM / DIR • AWG 24", color=purple, penwidth=2];
+  teensy -> driver2 [label="PWM / DIR • AWG 24", color=purple, penwidth=2];
 
   // =========================
   // KICKER
@@ -93,19 +93,19 @@ digraph RoboCupRobot {
     label="KICKER SYSTEM";
     color="#0b5394";
 
-    solenoid [label="Solenoid Kicker\n1264B, 12V, 20mm"];
+    solenoid [label="Solenoid Kicker\n1264B\n12V • 20mm"];
     mosfet   [label="Logic-Level N-MOSFET"];
     diode    [label="Flyback Diode"];
-    cap      [label="470–1000µF Cap"];
+    cap      [label="470–1000µF"];
     fuse     [label="3–5A Fuse"];
 
-    battery -> fuse     [label="12V", color=red, penwidth=2];
-    fuse    -> solenoid [label="12V", color=red, penwidth=2];
-    solenoid -> mosfet  [label="Drain", color=red, penwidth=1.5];
+    battery -> fuse     [label="12V • AWG 18", color=red, penwidth=2];
+    fuse    -> solenoid [label="12V • AWG 18", color=red, penwidth=2];
+    solenoid -> mosfet  [label="Drain • AWG 18", color=red, penwidth=1.5];
 
-    teensy -> mosfet    [label="KICK GPIO", color=teal, penwidth=2];
+    teensy -> mosfet    [label="KICK GPIO • AWG 24", color=teal, penwidth=2];
     diode  -> solenoid  [style=dashed, color=gray];
-    battery -> cap      [label="12V", color=red, penwidth=1.5];
+    battery -> cap      [label="12V • AWG 18", color=red, penwidth=1.5];
   }
 
   // =========================
