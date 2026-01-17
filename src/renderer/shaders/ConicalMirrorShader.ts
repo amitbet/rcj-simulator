@@ -36,9 +36,6 @@ export const ConicalMirrorShader = {
     varying vec2 vUv;
     
     void main() {
-      // Quick test: if cube texture is null/invalid, show test pattern
-      // (This shouldn't happen, but helps debug)
-      
       // Convert UV to polar coordinates (centered at 0.5, 0.5)
       vec2 center = vec2(0.5, 0.5);
       vec2 coord = vUv - center;
@@ -62,80 +59,79 @@ export const ConicalMirrorShader = {
         return;
       }
       
-      // Map circular mirror coordinates to equirectangular UV space
-      // Use the EXACT same calculation as raw cube map mode (mode 5)
+      // ===================================================================
+      // CONICAL MIRROR MAPPING
+      // ===================================================================
+      // For a conical mirror:
+      // - The center of the view (r=0) reflects what's around the robot at the horizon
+      // - The edges (r=1) reflect what's slightly above the horizon
+      // - Angle around the circle (theta) maps to azimuth (direction around robot)
+      //
+      // Physical setup:
+      // - Camera is 15cm off floor, looking up
+      // - Mirror apex is 4cm above camera (19cm off floor)
+      // - Mirror shows field around robot (horizon level)
       
-      // Angle around center (0 to 2*PI)
-      // atan(y, x): right (x>0, y=0) = 0, top (x=0, y<0) = -π/2, left (x<0, y=0) = π, bottom (x=0, y>0) = π/2
+      // Get angle around circle (azimuth)
+      // atan(y, x): right = 0°, top = -90°, left = ±180°, bottom = 90°
       float theta = atan(coord.y, coord.x);
       
-      // Map circular mirror to equirectangular UV:
-      // - Theta (angle around circle) -> longitude (wraps around horizontally)
-      // - Normalized radius -> latitude (vertical, focused on horizon)
+      // Map radius to elevation angle based on PHYSICAL CONICAL MIRROR GEOMETRY
       // 
-      // For conical mirror:
-      // - Center (r=0): horizon around robot (latitude = π/2, UV.y = 0.5)
-      // - Edges (r=1): slightly above horizon (latitude < π/2, UV.y < 0.5)
+      // Physical setup:
+      // - Mirror: 5cm diameter (2.5cm radius), 4cm above camera lens
+      // - Cone half-angle: tan⁻¹(2.5/4) ≈ 32° (slope of mirror surface)
+      // - Camera looking UP at mirror apex
+      //
+      // How conical mirror works:
+      // - Light from the field hits the conical mirror surface
+      // - Reflects down into the camera lens
+      // - Center of image (r=0, mirror apex): reflects HORIZON (distant objects)
+      // - Edges of image (r=1, mirror base): reflects GROUND near robot (close objects)
+      //
+      // Adjusted range to see BOTH goals (at horizon) AND ball (on ground, even when VERY close):
+      // - Center needs to see horizon for goals
+      // - Edges need VERY steep angle to see ball touching robot
+      //
+      // Center (r=0): look at horizon (distant goals, field edges)
+      // Edges (r=1): look VERY steeply down (ball even when touching robot)
+      float minElevation = 0.0;      // 0° (center - horizon, see distant goals)
+      float maxElevation = -1.3963;  // -80° (edges - VERY steep down, see ball at robot base)
+      float elevation = minElevation + normalizedR * (maxElevation - minElevation);
+      
+      // Convert spherical coordinates (azimuth, elevation) to 3D direction
+      // Elevation: 0 = horizon, positive = above horizon
+      // Azimuth (theta): angle around the robot
       // 
-      // Map theta to longitude: top of screen (theta=-π/2) should be forward
-      // In mode 5: forward is at longitudeAdjusted=0, which is longitude=π/2, which is UV.x=0.25
-      // So: theta=-π/2 (top) -> UV.x=0.25 (forward)
-      //     theta=0 (right) -> UV.x=0.5 (right side)
-      //     theta=π/2 (bottom) -> UV.x=0.75 (back)
-      //     theta=π (left) -> UV.x=0.0 or 1.0 (left side)
-      // Formula: UV.x = (theta + π/2) / (2π) + 0.25, wrapped
-      float equirectU = (theta + 1.5708) / 6.28318 + 0.25; // Map theta to UV.x, shifted so top is forward
-      equirectU = mod(equirectU, 1.0); // Wrap around [0, 1]
+      // Standard spherical to Cartesian:
+      // x = cos(elevation) * sin(azimuth)
+      // y = sin(elevation)
+      // z = cos(elevation) * cos(azimuth)
+      // 
+      // But we need to align with Three.js coordinate system and make top of view = forward
+      // Top of screen (theta = -π/2) should be forward (+Z)
+      // So we adjust: azimuth = theta + π/2 (rotate 90°)
+      float azimuth = theta + 1.5708; // +π/2 to make top = forward
       
-      // Map normalized radius to latitude (UV.y)
-      // For conical mirror: center (apex) reflects what's above, edges reflect horizon
-      // Center (r=0): slightly above horizon (latitude ≈ 75°, UV.y ≈ 0.4167) - shows field around robot
-      // Edges (r=1): horizon (latitude = π/2 = 90°, UV.y = 0.5) - shows horizon further out
-      // Focus on horizon: UV.y from 0.4167 (75°) to 0.5 (90°)
-      float distortionFactor = 1.0 + distortion * normalizedR * normalizedR;
-      float minLatitudeUV = 0.4167; // ~75° = π/2 - 15° = 1.3088 rad / π = 0.4167
-      float maxLatitudeUV = 0.5;    // 90° = π/2 = 1.5708 rad / π = 0.5
-      float latitudeRangeUV = maxLatitudeUV - minLatitudeUV;
-      
-      // Center (r=0) = slightly above horizon (minLatitudeUV), edges (r=1) = horizon (maxLatitudeUV)
-      // CORRECT: center has lower latitude (slightly above), edges have higher latitude (horizon)
-      float equirectV = minLatitudeUV + (normalizedR * distortionFactor * latitudeRangeUV);
-      equirectV = clamp(equirectV, minLatitudeUV, maxLatitudeUV);
-      
-      // Now use EXACT same calculation as raw cube map mode (mode 5)
-      vec2 equirectUV = vec2(equirectU, equirectV);
-      float longitude = equirectUV.x * 6.28318; // 0 to 2π
-      float latitude = equirectUV.y * 3.14159;  // 0 to π
-      float longitudeAdjusted = longitude - 1.5708; // Rotate so 0° is forward
-      
+      float cosElev = cos(elevation);
       vec3 direction = vec3(
-        sin(latitude) * cos(longitudeAdjusted),  // X (right)
-        cos(latitude),                           // Y (up when latitude=0)
-        sin(latitude) * sin(longitudeAdjusted)   // Z (forward when longitudeAdjusted=0)
+        cosElev * sin(azimuth),  // X (right/left)
+        sin(elevation),          // Y (up/down - positive = above horizon)
+        cosElev * cos(azimuth)   // Z (forward/back)
       );
       
-      // Rotate direction to match robot's heading
-      // Robot rotation is around Y axis (yaw)
+      // Rotate direction to match robot's heading (around Y axis)
       float cosRot = cos(robotRotation);
       float sinRot = sin(robotRotation);
       vec3 rotatedDir = vec3(
-        direction.x * cosRot - direction.z * sinRot,  // Rotate X/Z around Y
+        direction.x * cosRot - direction.z * sinRot,
         direction.y,
         direction.x * sinRot + direction.z * cosRot
       );
       
-      // Normalize to ensure unit length
-      float len = length(rotatedDir);
-      if (len > 0.001) {
-        rotatedDir = rotatedDir / len;
-      } else {
-        // Fallback: point forward
-        rotatedDir = vec3(0.0, 0.0, 1.0);
-      }
+      direction = normalize(rotatedDir);
       
-      direction = rotatedDir;
-      
-      // Debug modes - check early to skip mirror area restrictions
+      // Debug modes - check early to skip normal rendering
       if (debugMode > 3.5) {
         // Mode 5: Show raw cube map without distortion (equirectangular projection)
         // Map UV directly to cube map - show full view, not just circular mirror area
@@ -189,16 +185,16 @@ export const ConicalMirrorShader = {
         return;
       }
       
-      // Other debug modes (still respect mirror area)
+      // Other debug modes (visualize conical mirror coordinates)
       if (debugMode > 0.5) {
         if (debugMode < 1.5) {
-          // Mode 1: Show latitude as color (red = horizon, blue = up)
-          float latNorm = (equirectV - minLatitudeUV) / latitudeRangeUV; // Normalize to 0-1
-          gl_FragColor = vec4(latNorm, 0.0, 1.0 - latNorm, 1.0);
+          // Mode 1: Show elevation as color (blue = horizon, red = above)
+          float elevNorm = elevation / maxElevation; // Normalize to 0-1
+          gl_FragColor = vec4(elevNorm, 0.0, 1.0 - elevNorm, 1.0);
           return;
         } else if (debugMode < 2.5) {
-          // Mode 2: Show azimuth/longitude as color (rainbow around circle)
-          float azNorm = equirectU; // Already normalized to 0-1
+          // Mode 2: Show azimuth as color (rainbow around circle)
+          float azNorm = (theta + 3.14159) / 6.28318; // Normalize -π to π -> 0 to 1
           gl_FragColor = vec4(
             abs(azNorm * 3.0 - 1.0),
             abs(azNorm * 3.0 - 2.0),
@@ -219,26 +215,14 @@ export const ConicalMirrorShader = {
         }
       }
       
-      // Sample from cube map (textureCube for WebGL 1.0, texture for WebGL 2.0)
-      // Ensure direction is normalized and valid
-      if (length(direction) < 0.001) {
-        // Invalid direction - show red for debugging
-        gl_FragColor = vec4(1.0, 0.0, 0.0, 1.0);
-        return;
-      }
-      
+      // Sample from cube map
       direction = normalize(direction);
       
-      // Check if cube texture is valid
       #ifdef GL_ES
       vec4 color = textureCube(tDiffuse, direction);
       #else
       vec4 color = texture(tDiffuse, direction);
       #endif
-      
-      // Check if cube map sample is valid (not all black)
-      // If it's black, it might be a sampling issue, but don't show debug color
-      // Just use the black color as-is (might be valid black in scene)
       
       // Clamp color values to valid range (0-1)
       color = clamp(color, 0.0, 1.0);
