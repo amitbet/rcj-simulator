@@ -619,6 +619,147 @@ body {
   opacity: 1;
 }
 
+/* Robot Camera View */
+.robot-camera-view-container {
+  position: absolute;
+  bottom: 16px;
+  left: 16px;
+  z-index: 100;
+  pointer-events: none;
+}
+
+.robot-camera-view {
+  pointer-events: auto;
+  background: var(--bg-secondary);
+  border: 2px solid var(--accent-dim);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+  width: 400px;
+  display: flex;
+  flex-direction: column;
+}
+
+.robot-camera-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--bg-tertiary);
+  border-bottom: 1px solid var(--accent-dim);
+}
+
+.robot-camera-label {
+  font-family: var(--font-display);
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  white-space: nowrap;
+}
+
+.robot-camera-select {
+  flex: 1;
+  padding: 6px 10px;
+  background: var(--bg-primary);
+  border: 1px solid var(--accent-dim);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-family: var(--font-body);
+  font-size: 0.85rem;
+  cursor: pointer;
+  outline: none;
+  transition: all 0.2s ease;
+}
+
+.robot-camera-select:hover {
+  border-color: var(--accent);
+}
+
+.robot-camera-select:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 8px rgba(0, 212, 255, 0.3);
+}
+
+.robot-camera-display {
+  width: 100%;
+  height: 300px;
+  position: relative;
+  background: var(--bg-primary);
+  overflow: hidden;
+}
+
+.robot-camera-info {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  background: rgba(0, 0, 0, 0.7);
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 0.75rem;
+  z-index: 10;
+  display: flex;
+  gap: 12px;
+}
+
+.robot-camera-info-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.robot-camera-info-label {
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.robot-camera-info-value {
+  color: var(--text-primary);
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.robot-camera-info-value.blue {
+  color: var(--team-blue);
+}
+
+.robot-camera-info-value.yellow {
+  color: var(--team-yellow);
+}
+
+/* Pixy2 Detection Rectangles */
+.pixy2-detections {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 5;
+}
+
+.pixy2-rectangle {
+  position: absolute;
+  border: 2px solid;
+  box-shadow: 0 0 4px rgba(0, 0, 0, 0.8);
+  pointer-events: auto;
+}
+
+.pixy2-ball {
+  border-color: #ff6600; /* Orange */
+  background: rgba(255, 102, 0, 0.1);
+}
+
+.pixy2-goal-blue {
+  border-color: #00cccc; /* Cyan/Blue */
+  background: rgba(0, 204, 204, 0.1);
+}
+
+.pixy2-goal-yellow {
+  border-color: #ffcc00; /* Yellow */
+  background: rgba(255, 204, 0, 0.1);
+}
+
 /* Game phase overlay */
 .countdown-overlay {
   position: absolute;

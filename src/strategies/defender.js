@@ -106,17 +106,11 @@ function strategy(worldState) {
       resetLastHeading = null;
       resetDistanceMoved = 0; // Reset distance tracking
       
-      // #region agent log
-      fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'defender.js:110',message:'RESET_POSITION initialized',data:{resetTargetGoalIsBlue,resetInitialDistance,ownGoalDist:ownGoal.distance,ownGoalVis:ownGoal.visible,we_are_blue},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'U'})}).catch(()=>{});
-      // #endregion
       
       // If already very close to goal (<40cm) when entering RESET_POSITION, exit immediately
       // This prevents defenders from getting stuck trying to move into their own goal
       // Increased threshold from 30cm to 40cm to provide more safety margin
       if (ownGoal.visible && ownGoal.distance < 40) {
-        // #region agent log
-        fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'defender.js:118',message:'RESET_POSITION exiting immediately - too close to goal at entry',data:{ownGoalDist:ownGoal.distance},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'V'})}).catch(()=>{});
-        // #endregion
         ignoreLineDetection = false;
         resetEvents = [];
         resetTargetGoalIsBlue = null;
@@ -137,9 +131,6 @@ function strategy(worldState) {
     const ownGoalVis = ownGoal.visible;
     const ownGoalAngle = ownGoal.angle_deg;
     
-    // #region agent log
-    fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'defender.js:137',message:'RESET_POSITION active',data:{ownGoalDist,ownGoalVis,resetInitialDistance,resetDistanceMoved,we_are_blue},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'W'})}).catch(()=>{});
-    // #endregion
     
     // Calculate distance moved toward own goal (difference from initial distance)
     // Only update if goal is visible - if not visible, keep last known value
@@ -151,23 +142,14 @@ function strategy(worldState) {
       }
     }
     
-    // #region agent log
-    fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'defender.js:126',message:'RESET_POSITION distance tracking (toward own goal)',data:{resetInitialDistance,ownGoalDist,resetDistanceMoved,ownGoalVis,we_are_blue,exitCondition60:resetDistanceMoved >= 60},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'R'})}).catch(()=>{});
-    // #endregion
     
     // Exit reset after moving 60cm toward own goal OR if we're already very close to goal (<40cm)
     // If already close to goal, don't try to move closer - just exit immediately
     // This prevents defenders from getting stuck trying to move into their own goal
     // Increased threshold from 30cm to 40cm to provide more safety margin
     
-    // #region agent log
-    fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'defender.js:164',message:'RESET_POSITION exit check',data:{resetDistanceMoved,ownGoalDist,ownGoalVis,check60:resetDistanceMoved >= 60,check40:ownGoalVis && ownGoalDist < 40,willExit:resetDistanceMoved >= 60 || (ownGoalVis && ownGoalDist < 40)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'X'})}).catch(()=>{});
-    // #endregion
     
     if (resetDistanceMoved >= 60 || (ownGoalVis && ownGoalDist < 40)) {
-      // #region agent log
-      fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'defender.js:172',message:'RESET_POSITION exiting',data:{resetDistanceMoved,ownGoalDist,ownGoalVis,exitReason:resetDistanceMoved >= 60 ? 'moved60cm' : 'tooCloseToGoal'},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'S'})}).catch(()=>{});
-      // #endregion
       ignoreLineDetection = false;
       resetEvents = []; // Clear reset events
       resetTargetGoalIsBlue = null; // Clear locked goal
@@ -184,9 +166,6 @@ function strategy(worldState) {
     // This prevents defenders from ramming into their own goal
     // Increased threshold from 20cm to 30cm to provide more safety margin
     if (ownGoalVis && ownGoalDist < 30) {
-      // #region agent log
-      fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'defender.js:152',message:'RESET_POSITION too close to goal, stopping forward movement',data:{ownGoalDist,ownGoalAngle},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'T'})}).catch(()=>{});
-      // #endregion
       // Too close - just turn in place or stop, don't move forward
       const goalAngle = ownGoalAngle;
       if (Math_abs(goalAngle) > 15) {
@@ -590,9 +569,6 @@ function strategy(worldState) {
     
       // If too far from goal, move back
     if (ownGoal.visible && ownGoal.distance > MAX_DISTANCE_FROM_GOAL) {
-      // #region agent log
-      fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'defender.js:545',message:'SEARCHING too far from goal, backing up',data:{distanceFromGoal:ownGoal.distance,MAX_DISTANCE_FROM_GOAL},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H'})}).catch(()=>{});
-      // #endregion
       if (Math_abs(ownGoal.angle_deg) > 25) {
         const turn = clamp(ownGoal.angle_deg / 50, -1, 1) * 0.5;
         motor1 = -turn - 0.5; // Back up while turning
@@ -640,15 +616,9 @@ function strategy(worldState) {
     
     const distanceFromGoal = ownGoal.visible ? ownGoal.distance : 999;
     
-    // #region agent log
-    fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'defender.js:591',message:'DEFENDING state entry',data:{distanceFromGoal,MAX_DISTANCE_FROM_GOAL,ballVisible:ball.visible,ownGoalVisible:ownGoal.visible},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
-    // #endregion
     
     // Check if ball is close - transition to DEFLECTING if ball is within 40cm (even if we're far from goal)
     if (ball.visible && ball.distance < 40) {
-      // #region agent log
-      fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'defender.js:597',message:'DEFENDING transitioning to DEFLECTING (ball close)',data:{ballDist:ball.distance,distanceFromGoal},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'M'})}).catch(()=>{});
-      // #endregion
       currentState = STATE.DEFLECTING;
       return { motor1, motor2, motor3, motor4, kick };
     }
@@ -656,9 +626,6 @@ function strategy(worldState) {
     // CRITICAL: Always stay within 50cm of own goal, but also don't get too close (<40cm)
     // If too close to goal, move away (forward) to prevent getting stuck inside goal
     if (ownGoal.visible && distanceFromGoal < 40) {
-      // #region agent log
-      fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'defender.js:666',message:'DEFENDING too close to goal, moving away',data:{distanceFromGoal},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'Y'})}).catch(()=>{});
-      // #endregion
       // Too close to goal - move away from it (forward movement)
       const goalAngle = ownGoal.angle_deg;
       if (Math_abs(goalAngle) > 20) {
@@ -681,9 +648,6 @@ function strategy(worldState) {
     
     // CRITICAL: Always stay within 50cm of own goal
     if (distanceFromGoal > MAX_DISTANCE_FROM_GOAL) {
-      // #region agent log
-      fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'defender.js:690',message:'DEFENDING too far from goal, backing up',data:{distanceFromGoal,MAX_DISTANCE_FROM_GOAL},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-      // #endregion
       // Too far from goal - move back toward it immediately
       if (ownGoal.visible) {
         const goalAngle = ownGoal.angle_deg;
@@ -731,9 +695,6 @@ function strategy(worldState) {
       
       // CRITICAL: If we're near the boundary, only allow movements that keep us within bounds
       if (distanceFromGoal > SAFE_DISTANCE_THRESHOLD) {
-        // #region agent log
-        fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'defender.js:648',message:'DEFENDING near boundary',data:{distanceFromGoal,SAFE_DISTANCE_THRESHOLD,MAX_DISTANCE_FROM_GOAL},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
-        // #endregion
         // Too close to boundary - only allow backward movement or turning in place
         if (distanceFromGoal > MAX_DISTANCE_FROM_GOAL - 2) {
           // Very close to boundary - only back up
@@ -776,9 +737,6 @@ function strategy(worldState) {
       if (distanceFromGoal < desiredDistanceFromGoal - 10) {
         // Only move forward if it won't take us too far
         const forwardSpeed = 0.2; // Reduced speed
-        // #region agent log
-        fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'defender.js:682',message:'DEFENDING moving forward (too close to goal)',data:{distanceFromGoal,desiredDistanceFromGoal,forwardSpeed},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
-        // #endregion
         motor1 = forwardSpeed;
         motor2 = forwardSpeed;
         motor3 = forwardSpeed;
@@ -826,18 +784,12 @@ function strategy(worldState) {
           } else if (distanceFromGoal < desiredDistanceFromGoal - 5) {
             // Too close - move forward slightly (only if safe)
             if (distanceFromGoal < SAFE_DISTANCE_THRESHOLD) {
-              // #region agent log
-              fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'defender.js:737',message:'DEFENDING moving forward (adjusting position)',data:{distanceFromGoal,desiredDistanceFromGoal,SAFE_DISTANCE_THRESHOLD},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
-              // #endregion
               motor1 = 0.2;
               motor2 = 0.2;
               motor3 = 0.2;
               motor4 = 0.2;
             } else {
               // Too close to boundary - don't move forward
-              // #region agent log
-              fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'defender.js:745',message:'DEFENDING blocked forward movement (near boundary)',data:{distanceFromGoal,SAFE_DISTANCE_THRESHOLD},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'F'})}).catch(()=>{});
-              // #endregion
               motor1 = 0;
               motor2 = 0;
               motor3 = 0;
@@ -926,9 +878,6 @@ function strategy(worldState) {
       motor3 = backSpeed + turnSpeed;
     }
     
-    // #region agent log
-    fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'defender.js:827',message:'DEFENDING motors set',data:{motor1,motor2,motor3,motor4,distanceFromGoal,MAX_DISTANCE_FROM_GOAL},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'G'})}).catch(()=>{});
-    // #endregion
     
     return { motor1, motor2, motor3, motor4, kick };
   }
@@ -942,13 +891,7 @@ function strategy(worldState) {
     
     // If ball lost or too far, transition back to DEFENDING
     // Use a larger threshold (70cm) to prevent premature exit when ball is slightly out of range
-    // #region agent log
-    fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'defender.js:952',message:'DEFLECTING exit check',data:{ballVisible:ball.visible,ballDist:ball.visible ? ball.distance : null,willExit:!ball.visible || (ball.visible && ball.distance > 70)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'J'})}).catch(()=>{});
-    // #endregion
     if (!ball.visible || ball.distance > 70) {
-      // #region agent log
-      fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'defender.js:955',message:'DEFLECTING exiting to DEFENDING',data:{ballVisible:ball.visible,ballDist:ball.visible ? ball.distance : null,exitReason:!ball.visible ? 'ballLost' : 'ballTooFar'},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'K'})}).catch(()=>{});
-      // #endregion
       currentState = STATE.DEFENDING;
       return { motor1, motor2, motor3, motor4, kick };
     }
@@ -957,9 +900,6 @@ function strategy(worldState) {
     const ballAngle = ball.angle_deg;
     const ballDist = ball.distance;
     
-    // #region agent log
-    fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'defender.js:862',message:'DEFLECTING state entry',data:{distanceFromGoal,MAX_DISTANCE_FROM_GOAL,ballDist},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'K'})}).catch(()=>{});
-    // #endregion
     
     // In DEFLECTING state, we prioritize deflecting the ball toward opponent goal
     // We can be outside 50cm radius, but should try to stay within bounds when possible
@@ -978,9 +918,6 @@ function strategy(worldState) {
       // Move backward more strongly to return to goal area
       const backSpeed = -0.5; // Strong backward speed
       
-      // #region agent log
-      fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'defender.js:898',message:'DEFLECTING very far from goal (>60cm)',data:{distanceFromGoal,VERY_FAR_THRESHOLD,ballDist,ballAngle,goalAngle},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'P'})}).catch(()=>{});
-      // #endregion
       
       if (Math_abs(ballAngle) > 25) {
         // Turn toward ball first, but with strong backward bias
@@ -1033,9 +970,6 @@ function strategy(worldState) {
           pushAngle = ballAngle * 0.4 + opponentGoalAngle * 0.6;
         }
         
-        // #region agent log
-        fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'defender.js:946',message:'DEFLECTING near boundary (45-60cm)',data:{distanceFromGoal,SAFE_DISTANCE_THRESHOLD,ballDist,ballAngle,pushAngle},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'N'})}).catch(()=>{});
-        // #endregion
         
         // When near boundary, use very small forward speed or even backward
         const forwardSpeed = 0.15; // Very small forward speed
@@ -1056,9 +990,6 @@ function strategy(worldState) {
     // Push ball toward opponent goal while staying within bounds
     // Strategy: Turn toward ball, then push it in the direction of opponent goal
     
-    // #region agent log
-    fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'defender.js:965',message:'DEFLECTING within safe bounds',data:{distanceFromGoal,MAX_DISTANCE_FROM_GOAL,ballDist,ballAngle},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'O'})}).catch(()=>{});
-    // #endregion
     
     if (Math_abs(ballAngle) > 25) {
       // Turn toward ball first

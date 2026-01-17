@@ -150,9 +150,6 @@ function strategy(worldState) {
       }
     }
     
-    // #region agent log
-    fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'attacker.js:145',message:'RESET_POSITION distance tracking',data:{resetInitialDistance,furthestGoalDist,resetDistanceMoved,furthestGoalVis,exitCondition60:resetDistanceMoved >= 60},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'Q'})}).catch(()=>{});
-    // #endregion
     
     // Exit reset after moving 60cm toward the target goal
     // REMOVED fallback condition - we should only exit after moving 60cm, not when reaching goal
@@ -238,16 +235,10 @@ function strategy(worldState) {
     const stuckCount = resetEvents.filter(e => e.type === 'stuck').length;
     const uncrossingCount = resetEvents.filter(e => e.type === 'uncrossing').length;
     
-    // #region agent log
-    fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'attacker.js:245',message:'UNCROSSING_LINE reset check',data:{resetEventsLength:resetEvents.length,stuckCount,uncrossingCount,RESET_EVENT_THRESHOLD,ballVisible:ball.visible,ballDist:ball.visible ? ball.distance : null,ballVisibleAndClose,willEnterReset:uncrossingCount >= RESET_EVENT_THRESHOLD},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'Z'})}).catch(()=>{});
-    // #endregion
     
     // Enter RESET_POSITION if we have 3+ uncrossing events (regardless of ball visibility)
     // This ensures we reset after multiple line crossings
     if (uncrossingCount >= RESET_EVENT_THRESHOLD) {
-      // #region agent log
-      fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'attacker.js:242',message:'UNCROSSING_LINE entering RESET_POSITION',data:{resetEventsLength:resetEvents.length,ballVisible:ball.visible,ballDist:ball.visible ? ball.distance : null},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'AA'})}).catch(()=>{});
-      // #endregion
       currentState = STATE.RESET_POSITION;
       ignoreLineDetection = true;
       resetEvents = []; // Clear events
@@ -398,11 +389,6 @@ function strategy(worldState) {
         // Remove events older than window
         resetEvents = resetEvents.filter(e => t_ms - e.time < RESET_EVENT_WINDOW_MS);
         
-        // #region agent log
-        const stuckCount = resetEvents.filter(e => e.type === 'stuck').length;
-        const uncrossingCount = resetEvents.filter(e => e.type === 'uncrossing').length;
-        fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'attacker.js:397',message:'UNCROSSING_LINE event recorded',data:{resetEventsLength:resetEvents.length,stuckCount,uncrossingCount,RESET_EVENT_THRESHOLD},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'AD'})}).catch(()=>{});
-        // #endregion
         
         // Start reversing immediately
         const BACKOFF_MOTOR_VALUE = 0.6;
@@ -443,13 +429,7 @@ function strategy(worldState) {
     // If no longer stuck AND minimum time has passed, transition back to appropriate state
     const timeInStuck = t_ms - stuckEntryTime;
     const canExit = !stuck && !bumper_front && !bumper_left && !bumper_right && timeInStuck >= MIN_STUCK_TIME_MS;
-    // #region agent log
-    fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'attacker.js:432',message:'STUCK exit check',data:{stuck,bumper_front,bumper_left,bumper_right,ballVisible:ball.visible,timeInStuck,MIN_STUCK_TIME_MS,canExit},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H'})}).catch(()=>{});
-    // #endregion
     if (canExit) {
-      // #region agent log
-      fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'attacker.js:437',message:'STUCK exiting',data:{stuck,bumper_front,bumper_left,bumper_right,ballVisible:ball.visible,timeInStuck,newState:ball.visible ? 'ATTACKING' : 'SEARCHING'},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'I'})}).catch(()=>{});
-      // #endregion
       stuckEntryTime = null; // Reset stuck entry time
       ignoreLineDetection = false;
       // Transition back based on ball visibility
@@ -478,13 +458,7 @@ function strategy(worldState) {
   }
   
   // Check if we just became stuck (not already in STUCK state)
-  // #region agent log
-  fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'attacker.js:456',message:'STUCK entry check',data:{currentState,stuck,bumper_front,bumper_left,bumper_right,willEnter:currentState !== STATE.STUCK && (stuck || bumper_front || bumper_left || bumper_right)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'F'})}).catch(()=>{});
-  // #endregion
   if (currentState !== STATE.STUCK && (stuck || bumper_front || bumper_left || bumper_right)) {
-    // #region agent log
-    fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'attacker.js:472',message:'Entering STUCK state',data:{stuck,bumper_front,bumper_left,bumper_right,previousState:currentState},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'G'})}).catch(()=>{});
-    // #endregion
     currentState = STATE.STUCK;
     stuckEntryTime = t_ms; // Record when we entered STUCK
     ignoreLineDetection = true;
@@ -503,14 +477,8 @@ function strategy(worldState) {
     const stuckCount = resetEvents.filter(e => e.type === 'stuck').length;
     const uncrossingCount = resetEvents.filter(e => e.type === 'uncrossing').length;
     
-    // #region agent log
-    fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'attacker.js:490',message:'STUCK reset check',data:{resetEventsLength:resetEvents.length,stuckCount,uncrossingCount,RESET_EVENT_THRESHOLD,ballVisible:ball.visible,ballDist:ball.visible ? ball.distance : null,ballVisibleAndClose,willEnterReset:resetEvents.length >= RESET_EVENT_THRESHOLD && !ballVisibleAndClose},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'AB'})}).catch(()=>{});
-    // #endregion
     
     if (resetEvents.length >= RESET_EVENT_THRESHOLD && !ballVisibleAndClose) {
-      // #region agent log
-      fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'attacker.js:464',message:'STUCK entering RESET_POSITION',data:{resetEventsLength:resetEvents.length,ballVisible:ball.visible,ballDist:ball.visible ? ball.distance : null},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'AC'})}).catch(()=>{});
-      // #endregion
       currentState = STATE.RESET_POSITION;
       ignoreLineDetection = true;
       resetEvents = []; // Clear events
@@ -567,9 +535,6 @@ function strategy(worldState) {
     // If we have 3+ uncrossing events, enter RESET_POSITION (regardless of ball visibility)
     // This ensures we reset after multiple line crossings even if ball is visible
     if (uncrossingCount >= RESET_EVENT_THRESHOLD) {
-      // #region agent log
-      fetch('http://127.0.0.1:7244/ingest/e757a59f-ea0f-41f7-a3ef-6d61b5471d67',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'attacker.js:562',message:'Global check entering RESET_POSITION (3+ uncrossing events)',data:{uncrossingCount,RESET_EVENT_THRESHOLD,currentState,ballVisible:ball.visible,ballDist:ball.visible ? ball.distance : null},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'AE'})}).catch(()=>{});
-      // #endregion
       currentState = STATE.RESET_POSITION;
       ignoreLineDetection = true;
       resetEvents = []; // Clear events

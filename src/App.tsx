@@ -11,6 +11,7 @@ import { GameModeSelector } from './components/GameModeSelector';
 import { ControlPanel } from './components/ControlPanel';
 import { ScoreBoard } from './components/ScoreBoard';
 import { WorldView } from './components/WorldView';
+import { RobotCameraView } from './components/RobotCameraView';
 
 // Strategy file paths - using dynamic imports
 // These will be updated by Vite HMR automatically
@@ -36,6 +37,7 @@ const App: React.FC = () => {
   const [speed, setSpeed] = useState(1);
   const [isDragging, setIsDragging] = useState(false);
   const [dragTarget, setDragTarget] = useState<{ type: 'ball' | 'robot'; id?: string } | null>(null);
+  const [use360View, setUse360View] = useState(false);
 
   // Strategies state with hashes for change detection
   const [strategies, setStrategies] = useState<Record<string, { code: string; hash: string; loadTime: number }>>({});
@@ -320,6 +322,18 @@ const App: React.FC = () => {
     }
   };
 
+  // Toggle 360-degree conical mirror view
+  const handle360ViewToggle = () => {
+    const newValue = !use360View;
+    setUse360View(newValue);
+    
+    if (renderer3DRef.current) {
+      // Use first robot if available, or undefined for field view
+      const firstRobotId = simulationState?.robots.find(r => !r.penalized)?.id;
+      renderer3DRef.current.set360View(newValue, firstRobotId);
+    }
+  };
+
   // Tab change handler
   const handleTabChange = (tab: string) => {
     setActiveTab(tab);
@@ -395,6 +409,15 @@ const App: React.FC = () => {
           >
             3D View
           </button>
+          {viewMode === '3d' && (
+            <button
+              className={`view-toggle-btn ${use360View ? 'active' : ''}`}
+              onClick={handle360ViewToggle}
+              title="Toggle 360° Conical Mirror View (camera inside robot looking up)"
+            >
+              360° View
+            </button>
+          )}
         </div>
       </header>
 
@@ -463,6 +486,16 @@ const App: React.FC = () => {
                   </div>
                 </div>
               ))}
+
+            {/* Robot Camera View - Small display in corner */}
+            {simulationState && (
+              <div className="robot-camera-view-container">
+                <RobotCameraView 
+                  simulationState={simulationState} 
+                  simulationEngine={simulationRef.current}
+                />
+              </div>
+            )}
           </div>
         </div>
 

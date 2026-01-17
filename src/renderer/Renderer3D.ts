@@ -4,8 +4,12 @@
 
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
+import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { SimulationState, Team, RobotRole } from '../types';
 import { FIELD, GOAL, BALL, ROBOT, COLORS, CAMERA } from '../types/constants';
+import { ConicalMirrorShader } from './shaders/ConicalMirrorShader';
 
 export class Renderer3D {
   private container: HTMLElement;
@@ -17,6 +21,16 @@ export class Renderer3D {
   private ball: THREE.Mesh | null = null;
   private robots: Map<string, THREE.Group> = new Map();
   private field: THREE.Group | null = null;
+
+  // 360-degree conical mirror view
+  private composer: EffectComposer | null = null;
+  private conicalMirrorPass: ShaderPass | null = null;
+  private followRobotId: string | null = null;
+  private use360View: boolean = false;
+  private cubeCamera: THREE.CubeCamera | null = null;
+  private cubeRenderTarget: THREE.WebGLCubeRenderTarget | null = null;
+  private cubeScene: THREE.Scene | null = null;
+  private quadMesh: THREE.Mesh | null = null;
 
   constructor(container: HTMLElement) {
     this.container = container;
@@ -62,6 +76,93 @@ export class Renderer3D {
 
     // Handle resize
     window.addEventListener('resize', this.handleResize);
+  }
+
+  // Setup 360-degree conical mirror view
+  private setup360View(): void {
+    // Create cube render target for 360-degree capture
+    this.cubeRenderTarget = new THREE.WebGLCubeRenderTarget(512, {
+      format: THREE.RGBAFormat,
+      generateMipmaps: true,
+      minFilter: THREE.LinearMipmapLinearFilter
+    });
+    
+    // Create cube camera to capture 360-degree view around robot
+    // Near: 1cm, Far: 2000cm (20m) to ensure goals and field are captured
+    this.cubeCamera = new THREE.CubeCamera(1, 2000, this.cubeRenderTarget);
+    this.scene.add(this.cubeCamera);
+    
+    // Create effect composer for post-processing
+    this.composer = new EffectComposer(this.renderer);
+    
+    // Create a fullscreen quad material that uses the cube texture with conical mirror shader
+    const quadGeometry = new THREE.PlaneGeometry(2, 2);
+    const quadMaterial = new THREE.ShaderMaterial({
+      uniforms: {
+        tDiffuse: { value: this.cubeRenderTarget.texture },
+        mirrorAngle: { value: Math.PI / 4 },
+        distortion: { value: 1.5 },
+        debugMode: { value: 0 }, // 0=normal, 1=elevation, 2=azimuth, 3=direction, 4=raw cube
+        robotRotation: { value: 0.0 } // Robot's heading angle in radians
+      },
+      vertexShader: ConicalMirrorShader.vertexShader,
+      fragmentShader: ConicalMirrorShader.fragmentShader
+    });
+    this.quadMesh = new THREE.Mesh(quadGeometry, quadMaterial);
+    this.cubeScene = new THREE.Scene();
+    this.cubeScene.add(this.quadMesh);
+    
+    // Create render pass for the quad scene (fullscreen quad with cube texture)
+    const orthoCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+    const renderPass = new RenderPass(this.cubeScene, orthoCamera);
+    this.composer.addPass(renderPass);
+  }
+
+  // Set debug mode for conical mirror shader
+  // 0=normal, 1=elevation, 2=azimuth, 3=direction, 4=raw cube map
+  public setDebugMode(mode: number): void {
+    if (this.quadMesh) {
+      const material = this.quadMesh.material as THREE.ShaderMaterial;
+      if (material.uniforms && material.uniforms.debugMode) {
+        material.uniforms.debugMode.value = mode;
+      }
+    }
+  }
+
+  // Toggle 360 view mode
+  public set360View(enabled: boolean, robotId?: string): void {
+    this.use360View = enabled;
+    this.followRobotId = robotId || null;
+    
+    if (enabled) {
+      // Setup 360 view
+      if (!this.composer) {
+        this.setup360View();
+      }
+      // Disable orbit controls
+      if (this.controls) {
+        this.controls.enabled = false;
+      }
+      // Position camera inside robot, looking upward
+      this.camera.rotation.set(-Math.PI / 2, 0, 0); // Look straight up
+      // Set very wide FOV (near 180 degrees) to capture hemisphere for conical mirror
+      // Use maximum FOV to capture full 360-degree view through conical mirror
+      this.camera.fov = 180; // Maximum FOV to capture full hemisphere/360 view
+      this.camera.updateProjectionMatrix();
+    } else {
+      // Restore normal view
+      if (this.controls) {
+        this.controls.enabled = true;
+      }
+      this.camera.position.set(
+        CAMERA.INITIAL_POSITION.x,
+        CAMERA.INITIAL_POSITION.y,
+        CAMERA.INITIAL_POSITION.z
+      );
+      this.camera.rotation.set(0, 0, 0);
+      this.camera.fov = CAMERA.FOV;
+      this.camera.updateProjectionMatrix();
+    }
   }
 
   private setupLights(): void {
@@ -229,8 +330,8 @@ export class Renderer3D {
     const goalAreaW = FIELD.PENALTY_AREA_WIDTH;
     const goalAreaD = FIELD.PENALTY_AREA_DEPTH;
 
-    // Blue goal
-    const blueGoal = this.createGoalMesh(0x0066cc);
+    // Blue goal - bright cyan/blue for color recognition
+    const blueGoal = this.createGoalMesh(0x00ffff); // Bright cyan (0x00ffff) for better color detection
     blueGoal.position.set(0, 0, -halfH - GOAL.DEPTH / 2);
     this.field!.add(blueGoal);
 
@@ -240,8 +341,8 @@ export class Renderer3D {
     blueGoalArea.position.set(0, 0.1, -halfH + goalAreaD / 2);
     this.field!.add(blueGoalArea);
 
-    // Yellow goal
-    const yellowGoal = this.createGoalMesh(0xffcc00);
+    // Yellow goal - bright yellow for color recognition
+    const yellowGoal = this.createGoalMesh(0xffff00); // Bright yellow (0xffff00) for better color detection
     yellowGoal.position.set(0, 0, halfH + GOAL.DEPTH / 2);
     yellowGoal.rotation.y = Math.PI;
     this.field!.add(yellowGoal);
@@ -292,10 +393,13 @@ export class Renderer3D {
   private createGoalMesh(color: number): THREE.Group {
     const goal = new THREE.Group();
 
+    // Use bright, saturated colors with emissive properties for better color recognition
     const goalMat = new THREE.MeshStandardMaterial({
       color,
-      roughness: 0.5,
-      metalness: 0.3,
+      emissive: color, // Emissive color matches base color for brightness
+      emissiveIntensity: 0.5, // Make goals glow/bright
+      roughness: 0.2, // Lower roughness for more saturated appearance
+      metalness: 0.0, // No metalness for pure color
     });
 
     // Back
@@ -326,10 +430,13 @@ export class Renderer3D {
 
   private createBall(): void {
     const ballGeom = new THREE.SphereGeometry(BALL.RADIUS, 32, 32);
+    // Bright orange for color recognition (matching RoboCup standards)
     const ballMat = new THREE.MeshStandardMaterial({
-      color: 0xff6600,
-      roughness: 0.3,
-      metalness: 0.1,
+      color: 0xff6600, // Bright orange
+      emissive: 0xff6600, // Emissive color matches base color for brightness
+      emissiveIntensity: 0.5, // Make ball glow/bright
+      roughness: 0.2, // Lower roughness for more saturated appearance
+      metalness: 0.0, // No metalness for pure color
     });
     this.ball = new THREE.Mesh(ballGeom, ballMat);
     this.ball.castShadow = true;
@@ -398,6 +505,9 @@ export class Renderer3D {
     const marker = new THREE.Mesh(markerGeom, markerMat);
     marker.position.y = bodyHeight + 0.5;
     robot.add(marker);
+    
+    // Store marker reference for hiding during cube camera capture
+    robot.userData.roleMarker = marker;
 
     // Front arrow indicator - shows which direction the robot is facing
     // Positioned above the robot, at the edge pointing toward kicker
@@ -474,6 +584,31 @@ export class Renderer3D {
   }
 
   render(state: SimulationState): void {
+    // Update camera position if following a robot in 360 view
+    if (this.use360View && this.followRobotId) {
+      const robotState = state.robots.find(r => r.id === this.followRobotId);
+      if (robotState && !robotState.penalized) {
+        // Physical setup: Pixy2.1 camera at 15cm height, mirror apex 4cm above (19cm total)
+        const cameraHeight = 15.0; // 15cm off the floor
+        const cameraPos = {
+          x: robotState.x,
+          y: cameraHeight, // Camera at 15cm height
+          z: robotState.y
+        };
+        
+        this.camera.position.set(cameraPos.x, cameraPos.y, cameraPos.z);
+        // Camera always looks straight up (conical mirror is above)
+        this.camera.rotation.set(-Math.PI / 2, 0, 0);
+        
+        // Update cube camera to capture 360-degree view around robot
+        if (this.cubeCamera) {
+          this.cubeCamera.position.set(cameraPos.x, cameraPos.y, cameraPos.z);
+          // Update cube camera to capture current scene from all directions
+          this.cubeCamera.update(this.renderer, this.scene);
+        }
+      }
+    }
+
     // Update ball position
     if (this.ball) {
       this.ball.position.set(state.ball.x, BALL.RADIUS, state.ball.y);
@@ -509,11 +644,95 @@ export class Renderer3D {
       }
     }
 
-    // Update controls
-    this.controls.update();
+    // Update controls (if not in 360 view)
+    if (!this.use360View && this.controls) {
+      this.controls.update();
+    }
 
-    // Render
-    this.renderer.render(this.scene, this.camera);
+    // Render with post-processing for 360 view, or normal render
+    if (this.use360View && this.composer && this.cubeCamera && this.cubeRenderTarget && this.quadMesh) {
+      // Update cube camera first to capture 360-degree view around robot
+      if (this.followRobotId) {
+        const robotState = state.robots.find(r => r.id === this.followRobotId);
+        if (robotState && !robotState.penalized) {
+          // Hide role indicators (colored spheres) and arrow indicators during cube camera capture
+          // Traverse scene to find all markers (more robust than relying on stored references)
+          const hiddenObjects: THREE.Object3D[] = [];
+          
+          // Function to recursively find and hide role markers and arrows
+          const hideMarkers = (obj: THREE.Object3D) => {
+            // Check if this is a role marker (colored sphere) or arrow indicator
+            if (obj instanceof THREE.Mesh) {
+              const material = obj.material;
+              if (material instanceof THREE.MeshBasicMaterial) {
+                // Role markers: red (0xff4444) for attacker or green (0x44ff44) for defender
+                // Arrow: white (0xffffff) but we'll hide it too to be safe
+                const color = (material.color as THREE.Color).getHex();
+                if (color === 0xff4444 || color === 0x44ff44 || color === 0xffffff) {
+                  // Check if it's small enough to be a marker (not a goal or other large object)
+                  if (obj.geometry instanceof THREE.SphereGeometry || 
+                      obj.geometry instanceof THREE.ConeGeometry ||
+                      (obj.geometry instanceof THREE.BoxGeometry && 
+                       obj.geometry.parameters.width < 5 && 
+                       obj.geometry.parameters.height < 5)) {
+                    if (obj.visible) {
+                      obj.visible = false;
+                      hiddenObjects.push(obj);
+                    }
+                  }
+                }
+              }
+            }
+            // Recursively check children
+            for (const child of obj.children) {
+              hideMarkers(child);
+            }
+          };
+          
+          // Hide markers in all robots
+          for (const robot of this.robots.values()) {
+            hideMarkers(robot);
+          }
+          
+          // Hide the robot being viewed (so it doesn't appear in its own camera view)
+          const viewedRobot = this.robots.get(this.followRobotId!);
+          let robotWasHidden = false;
+          if (viewedRobot && viewedRobot.visible) {
+            viewedRobot.visible = false;
+            robotWasHidden = true;
+          }
+          
+          // Physical setup: Pixy2.1 camera at 15cm height, mirror apex 4cm above (19cm total)
+          const cameraHeight = 15.0; // 15cm off the floor
+          this.cubeCamera.position.set(robotState.x, cameraHeight, robotState.y);
+          // Update cube camera to capture scene from all 6 directions
+          this.cubeCamera.update(this.renderer, this.scene);
+          
+          // Restore robot visibility
+          if (robotWasHidden && viewedRobot) {
+            viewedRobot.visible = true;
+          }
+          
+          // Restore markers visibility
+          for (const obj of hiddenObjects) {
+            obj.visible = true;
+          }
+          
+          // Update quad material with latest cube texture and robot rotation
+          const material = this.quadMesh.material as THREE.ShaderMaterial;
+          if (material.uniforms) {
+            material.uniforms.tDiffuse.value = this.cubeRenderTarget.texture;
+            // Pass robot's rotation to shader (physics: angle 0 => facing +X, render: rotation.y = -angle)
+            // So robotRotation in shader should be -robotState.angle to match
+            material.uniforms.robotRotation.value = -robotState.angle;
+          }
+        }
+      }
+      // Render with composer (will render fullscreen quad with cube texture)
+      this.composer.render();
+    } else {
+      this.renderer.render(this.scene, this.camera);
+    }
   }
 
   private handleResize = (): void => {
@@ -529,13 +748,43 @@ export class Renderer3D {
       this.camera.aspect = width / height;
       this.camera.updateProjectionMatrix();
       this.renderer.setSize(width, height);
+      
+      // Update composer size if using 360 view
+      if (this.composer) {
+        this.composer.setSize(width, height);
+      }
     }
   }
 
   dispose(): void {
     window.removeEventListener('resize', this.handleResize);
     this.renderer.dispose();
-    this.controls.dispose();
+    if (this.controls) {
+      this.controls.dispose();
+    }
+    if (this.composer) {
+      this.composer.dispose();
+    }
+    if (this.cubeCamera) {
+      this.scene.remove(this.cubeCamera);
+      this.cubeCamera = null;
+    }
+    if (this.cubeRenderTarget) {
+      this.cubeRenderTarget.dispose();
+      this.cubeRenderTarget = null;
+    }
+    if (this.quadMesh) {
+      if (this.quadMesh.material) {
+        (this.quadMesh.material as THREE.Material).dispose();
+      }
+      if (this.quadMesh.geometry) {
+        this.quadMesh.geometry.dispose();
+      }
+      this.quadMesh = null;
+    }
+    if (this.cubeScene) {
+      this.cubeScene = null;
+    }
     
     if (this.container.contains(this.renderer.domElement)) {
       this.container.removeChild(this.renderer.domElement);
