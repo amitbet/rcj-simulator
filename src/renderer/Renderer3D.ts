@@ -229,22 +229,44 @@ export class Renderer3D {
   }
 
   private createFieldMarkings(): void {
-    const lineMat = new THREE.LineBasicMaterial({ color: 0xffffff });
-    
     const halfW = FIELD.WIDTH / 2;
     const halfH = FIELD.HEIGHT / 2;
 
-    // Outer boundary
-    const boundaryPoints = [
-      new THREE.Vector3(-halfW, 0.1, -halfH),
-      new THREE.Vector3(halfW, 0.1, -halfH),
-      new THREE.Vector3(halfW, 0.1, halfH),
-      new THREE.Vector3(-halfW, 0.1, halfH),
-      new THREE.Vector3(-halfW, 0.1, -halfH),
-    ];
-    const boundaryGeom = new THREE.BufferGeometry().setFromPoints(boundaryPoints);
-    const boundary = new THREE.Line(boundaryGeom, lineMat);
-    this.field!.add(boundary);
+    // Field boundary - make it wider like goal lines (using mesh instead of thin line)
+    const boundaryWidth = 2; // 2cm wide white boundary strips
+    const boundaryMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+    
+    // Top boundary
+    const topBoundary = new THREE.Mesh(
+      new THREE.BoxGeometry(FIELD.WIDTH + boundaryWidth * 2, 0.2, boundaryWidth),
+      boundaryMat
+    );
+    topBoundary.position.set(0, 0.1, -halfH - boundaryWidth / 2);
+    this.field!.add(topBoundary);
+    
+    // Bottom boundary
+    const bottomBoundary = new THREE.Mesh(
+      new THREE.BoxGeometry(FIELD.WIDTH + boundaryWidth * 2, 0.2, boundaryWidth),
+      boundaryMat
+    );
+    bottomBoundary.position.set(0, 0.1, halfH + boundaryWidth / 2);
+    this.field!.add(bottomBoundary);
+    
+    // Left boundary
+    const leftBoundary = new THREE.Mesh(
+      new THREE.BoxGeometry(boundaryWidth, 0.2, FIELD.HEIGHT),
+      boundaryMat
+    );
+    leftBoundary.position.set(-halfW - boundaryWidth / 2, 0.1, 0);
+    this.field!.add(leftBoundary);
+    
+    // Right boundary
+    const rightBoundary = new THREE.Mesh(
+      new THREE.BoxGeometry(boundaryWidth, 0.2, FIELD.HEIGHT),
+      boundaryMat
+    );
+    rightBoundary.position.set(halfW + boundaryWidth / 2, 0.1, 0);
+    this.field!.add(rightBoundary);
 
     // Center line (BLACK - not white, so line sensors don't detect it)
     const centerLinePoints = [

@@ -78,6 +78,16 @@ body {
   overflow: hidden;
 }
 
+/* Camera Grid Container */
+.camera-grid-container {
+  width: 420px;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-secondary);
+  border-right: 1px solid var(--accent-dim);
+  overflow-y: auto;
+}
+
 /* Simulator View */
 .simulator-container {
   flex: 1;
@@ -621,23 +631,20 @@ body {
 
 /* Robot Camera View */
 .robot-camera-view-container {
-  position: absolute;
-  bottom: 16px;
-  left: 16px;
-  z-index: 100;
-  pointer-events: none;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 
 .robot-camera-view {
-  pointer-events: auto;
   background: var(--bg-secondary);
-  border: 2px solid var(--accent-dim);
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-lg);
+  border-bottom: 1px solid var(--accent-dim);
   overflow: hidden;
-  width: 400px;
   display: flex;
   flex-direction: column;
+  flex: 1;
+  min-height: 0;
 }
 
 .robot-camera-header {
@@ -683,7 +690,8 @@ body {
 
 .robot-camera-display {
   width: 100%;
-  height: 300px;
+  flex: 1;
+  min-height: 200px;
   position: relative;
   background: var(--bg-primary);
   overflow: hidden;

@@ -409,19 +409,23 @@ const App: React.FC = () => {
           >
             3D View
           </button>
-          {viewMode === '3d' && (
-            <button
-              className={`view-toggle-btn ${use360View ? 'active' : ''}`}
-              onClick={handle360ViewToggle}
-              title="Toggle 360° Conical Mirror View (camera inside robot looking up)"
-            >
-              360° View
-            </button>
-          )}
         </div>
       </header>
 
       <main className="app-main">
+        {/* Camera Grid on the left */}
+        <div className="camera-grid-container">
+          {simulationState && simulationState.robots.map((robot) => (
+            <div key={robot.id} className="robot-camera-view-container">
+              <RobotCameraView 
+                simulationState={simulationState} 
+                simulationEngine={simulationRef.current}
+                robotId={robot.id}
+              />
+            </div>
+          ))}
+        </div>
+
         <div className="simulator-container">
           <div className="view-container">
             {/* 2D Canvas */}
@@ -487,15 +491,6 @@ const App: React.FC = () => {
                 </div>
               ))}
 
-            {/* Robot Camera View - Small display in corner */}
-            {simulationState && (
-              <div className="robot-camera-view-container">
-                <RobotCameraView 
-                  simulationState={simulationState} 
-                  simulationEngine={simulationRef.current}
-                />
-              </div>
-            )}
           </div>
         </div>
 
