@@ -735,6 +735,55 @@ body {
   color: var(--team-yellow);
 }
 
+/* Camera distance info overlay */
+.camera-distance-info {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: rgba(0, 0, 0, 0.85);
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 0.75rem;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 120px;
+  border: 1px solid var(--accent-dim);
+}
+
+.distance-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.distance-label {
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: 0.7rem;
+}
+
+.distance-label.ball {
+  color: #ff6600;
+}
+
+.distance-label.goal_blue {
+  color: #00ffff;
+}
+
+.distance-label.goal_yellow {
+  color: #ffff00;
+}
+
+.distance-value {
+  color: var(--text-primary);
+  font-weight: 700;
+  font-family: var(--font-display);
+  font-size: 0.8rem;
+}
+
 /* Pixy2 Detection Rectangles */
 .pixy2-detections {
   position: absolute;

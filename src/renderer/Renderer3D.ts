@@ -779,6 +779,11 @@ export class Renderer3D {
     }
   }
 
+  // Get the WebGL canvas for pixel reading
+  public getCanvas(): HTMLCanvasElement {
+    return this.renderer.domElement;
+  }
+
   dispose(): void {
     window.removeEventListener('resize', this.handleResize);
     this.renderer.dispose();
