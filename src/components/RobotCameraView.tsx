@@ -177,23 +177,35 @@ export const RobotCameraView: React.FC<RobotCameraViewProps> = ({ simulationStat
         const boxHeight = maxY - minY;
         
         // Calculate angle from bounding box position in circular view
-        // Object position in percentage (center = 50%, 50%)
-        const objCenterX = (minX + boxWidth / 2) / width * 100;
-        const objCenterY = (minY + boxHeight / 2) / height * 100;
+        // CRITICAL: Must accurately map screen position to robot-relative angle
+        // Expected mapping: bottom center = 0° (forward), right center = 90° (right), 
+        //                    top center = 180°/-180° (back), left center = -90° (left)
         
-        // Calculate angle relative to robot forward direction
-        // In circular view: bottom = forward (0°), left = 90°, top = 180°, right = -90°
-        const dx = objCenterX - 50; // Offset from center
-        const dy = objCenterY - 50; // Offset from center
+        // Get object center in pixel coordinates
+        const objCenterX_px = minX + boxWidth / 2;
+        const objCenterY_px = minY + boxHeight / 2;
         
-        // Calculate angle (atan2 gives angle from positive x-axis)
-        const rawAngleRad = Math.atan2(dy, dx);
-        // Adjust so bottom of view = 0° (forward)
-        // atan2: right=0°, bottom=90°, left=180°, top=-90°
-        // We want: bottom=0°, left=90°, top=180°, right=-90°
-        // So: angle = rawAngle - 90°
-        const adjustedAngleRad = rawAngleRad - Math.PI / 2;
-        let angle_deg = adjustedAngleRad * 180 / Math.PI;
+        // Convert to normalized coordinates centered at image center
+        // Canvas: X=0 is left, Y=0 is top
+        const centerX = width / 2;
+        const centerY = height / 2;
+        const dx = objCenterX_px - centerX; // Positive = right
+        const dy = objCenterY_px - centerY; // Positive = down (canvas Y increases downward)
+        
+        // Calculate angle using atan2
+        // Canvas coordinates: X increases right, Y increases down
+        // Calculate theta from canvas position
+        const theta = Math.atan2(dy, dx); // atan2(y, x): right=0°, bottom=90°, left=±180°, top=-90°
+        
+        // Convert to robot-relative angle where:
+        //   Bottom (forward) = 0°, Right = 90°, Top (back) = 180°/-180°, Left = -90°
+        // We need to rotate by -90° and negate: angle = -(theta - π/2) = -theta + π/2
+        // This gives:
+        //   Bottom (θ=90°): angle = -90° + 90° = 0° ✓
+        //   Right (θ=0°): angle = 0° + 90° = 90° ✓
+        //   Left (θ=180°): angle = -180° + 90° = -90° ✓
+        //   Top (θ=-90°): angle = 90° + 90° = 180° ✓
+        let angle_deg = (-theta + Math.PI / 2) * 180 / Math.PI;
         
         // Normalize to -180 to 180 range
         while (angle_deg > 180) angle_deg -= 360;
@@ -315,11 +327,26 @@ export const RobotCameraView: React.FC<RobotCameraViewProps> = ({ simulationStat
         <label className="robot-camera-label">
           {robot.team.toUpperCase()} {robot.role.toUpperCase()}
         </label>
-        {robot.penalized && (
-          <span style={{ color: 'var(--error)', fontSize: '0.7rem', fontWeight: 'bold', marginLeft: 'auto' }}>
-            PENALTY {Math.ceil(robot.penaltyTimeRemaining_ms / 1000)}s
-          </span>
-        )}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginLeft: 'auto' }}>
+          {worldState?.state && (
+            <span style={{ 
+              color: 'var(--accent)', 
+              fontSize: '0.7rem', 
+              fontWeight: 'bold',
+              textTransform: 'uppercase',
+              padding: '0.2rem 0.5rem',
+              backgroundColor: 'rgba(0, 0, 0, 0.3)',
+              borderRadius: '4px'
+            }}>
+              {worldState.state}
+            </span>
+          )}
+          {robot.penalized && (
+            <span style={{ color: 'var(--error)', fontSize: '0.7rem', fontWeight: 'bold' }}>
+              PENALTY {Math.ceil(robot.penaltyTimeRemaining_ms / 1000)}s
+            </span>
+          )}
+        </div>
       </div>
       <div className="robot-camera-display" ref={containerRef}>
         {/* Hidden 2D canvas for pixel reading */}

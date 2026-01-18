@@ -76,27 +76,25 @@ export const ConicalMirrorShader = {
       // atan(y, x): right = 0°, top = -90°, left = ±180°, bottom = 90°
       float theta = atan(coord.y, coord.x);
       
-      // Map radius to elevation angle based on PHYSICAL CONICAL MIRROR GEOMETRY
+      // Map radius to elevation angle based on SIMPLE CONICAL MIRROR GEOMETRY
       // 
       // Physical setup:
-      // - Mirror: 5cm diameter (2.5cm radius), 4cm above camera lens
-      // - Cone half-angle: tan⁻¹(2.5/4) ≈ 32° (slope of mirror surface)
+      // - Mirror: 5cm diameter (2.5cm radius), 1.5cm depth (height above camera lens)
+      // - Cone half-angle: tan⁻¹(2.5/1.5) ≈ 59° (slope of mirror surface)
       // - Camera looking UP at mirror apex
       //
-      // How conical mirror works:
-      // - Light from the field hits the conical mirror surface
-      // - Reflects down into the camera lens
-      // - Center of image (r=0, mirror apex): reflects HORIZON (distant objects)
-      // - Edges of image (r=1, mirror base): reflects GROUND near robot (close objects)
+      // Simple non-curved conical mirror:
+      // - Linear relationship: radius position maps linearly to elevation angle
+      // - Center of image (r=0, mirror apex): reflects HORIZON (distant objects at 0°)
+      // - Edges of image (r=1, mirror base): reflects GROUND near robot
+      // - Elevation angle = -atan(radius/depth) = -atan(2.5/1.5) ≈ -59° at edges
       //
-      // Adjusted range to see BOTH goals (at horizon) AND ball (on ground, even when VERY close):
-      // - Center needs to see horizon for goals
-      // - Edges need VERY steep angle to see ball touching robot
-      //
-      // Center (r=0): look at horizon (distant goals, field edges)
-      // Edges (r=1): look VERY steeply down (ball even when touching robot)
-      float minElevation = 0.0;      // 0° (center - horizon, see distant goals)
-      float maxElevation = -1.3963;  // -80° (edges - VERY steep down, see ball at robot base)
+      // Linear mapping (no power curve): r directly maps to elevation
+      // Center (r=0): horizon (0°)
+      // Edges (r=1): ground near robot (-59°)
+      float minElevation = 0.0;      // 0° (center - horizon, sees distant goals)
+      float maxElevation = -1.0304;  // -59° (edges - atan(2.5/1.5), sees ground objects)
+      // Simple linear mapping: no power curve, direct relationship
       float elevation = minElevation + normalizedR * (maxElevation - minElevation);
       
       // Convert spherical coordinates (azimuth, elevation) to 3D direction
@@ -258,11 +256,15 @@ export const ConicalMirrorShader = {
       // Clamp color values to valid range (0-1)
       color = clamp(color, 0.0, 1.0);
       
-      // Increase brightness (make camera view brighter)
-      color.rgb *= 1.5; // Increase brightness by 50%
+      // Increase brightness to make objects visible (moderate boost to avoid color washout)
+      color.rgb *= 1.7; // Increase brightness by 70% (balanced for visibility and color accuracy)
       
-      // Add slight vignette effect at mirror edges (less aggressive)
-      float vignette = 1.0 - (normalizedR / mirrorRadius) * 0.2;
+      // Increase contrast to make objects stand out (moderate increase)
+      color.rgb = (color.rgb - 0.5) * 1.3 + 0.5; // Increase contrast by 30%
+      color.rgb = clamp(color.rgb, 0.0, 1.0);
+      
+      // Reduce vignette effect at mirror edges (less darkening = more visible)
+      float vignette = 1.0 - (normalizedR / mirrorRadius) * 0.1; // Reduced from 0.2 to 0.1
       color.rgb *= vignette;
       
       gl_FragColor = color;
