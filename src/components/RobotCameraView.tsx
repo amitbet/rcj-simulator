@@ -111,10 +111,10 @@ export const RobotCameraView: React.FC<RobotCameraViewProps> = ({ simulationStat
         bMin: 150, bMax: 255,
         label: 'Blue Goal'
       },
-      goal_yellow: { // Yellow goal
-        rMin: 200, rMax: 255,
-        gMin: 200, gMax: 255,
-        bMin: 0, bMax: 150,
+      goal_yellow: { // Yellow goal - MUCH wider range to get larger bbox
+        rMin: 160, rMax: 255,  // Very permissive (was 200)
+        gMin: 160, gMax: 255,  // Very permissive (was 200)
+        bMin: 0, bMax: 140,    // Wide range (was 100)
         label: 'Yellow Goal'
       }
     };
@@ -199,41 +199,32 @@ export const RobotCameraView: React.FC<RobotCameraViewProps> = ({ simulationStat
         const boxHeight = maxY - minY;
         
         // Estimate distance based on bounding box size
-        // Larger boxes = closer objects, smaller boxes = farther objects
+        // CRITICAL: Larger area percentage = CLOSER = SMALLER distance number
         const boxArea = boxWidth * boxHeight;
         const normalizedArea = boxArea / (width * height); // 0 to 1
         
-        // Distance estimation with corrected formula
-        // INVERSE relationship: LARGER area = CLOSER (smaller distance)
+        // Distance estimation: inverse relationship with area
+        // When box is HUGE (touching robot), distance should be ~5cm
+        // When box is tiny (far away), distance should be ~300cm
         let estimatedDistance = 0;
-        if (colorKey === 'ball') {
-          // Ball: range 5-250cm
-          // Use inverse square root for more natural distance scaling
-          if (normalizedArea > 0.05) {
-            // Very close: area > 5%
-            estimatedDistance = 5 + (0.1 - normalizedArea) * 500;
-          } else if (normalizedArea > 0.01) {
-            // Medium: area 1-5%
-            estimatedDistance = 30 + (0.05 - normalizedArea) * 1000;
-          } else {
-            // Far: area < 1%
-            estimatedDistance = 70 + (0.01 - normalizedArea) * 5000;
-          }
-        } else {
-          // Goals: range 10-350cm
-          if (normalizedArea > 0.1) {
-            // Very close: area > 10%
-            estimatedDistance = 10 + (0.2 - normalizedArea) * 500;
-          } else if (normalizedArea > 0.02) {
-            // Medium: area 2-10%
-            estimatedDistance = 50 + (0.1 - normalizedArea) * 1000;
-          } else {
-            // Far: area < 2%
-            estimatedDistance = 130 + (0.02 - normalizedArea) * 5000;
-          }
-        }
         
-        estimatedDistance = Math.max(5, Math.min(350, estimatedDistance));
+        if (colorKey === 'ball') {
+          // Ball diameter is ~4cm, typical detection range 5-220cm
+          // Calibrated so quarter-field distance (~55cm) shows correctly
+          const k = 1.5; // Calibration constant (increased from 0.6)
+          estimatedDistance = k / Math.sqrt(normalizedArea + 0.0001);
+          estimatedDistance = Math.max(5, Math.min(250, estimatedDistance));
+        } else if (colorKey === 'goal_blue') {
+          // Blue goal
+          const k = 4.5;
+          estimatedDistance = k / Math.sqrt(normalizedArea + 0.0001);
+          estimatedDistance = Math.max(10, Math.min(350, estimatedDistance));
+        } else {
+          // Yellow goal - now same as blue since bbox sizes are equal
+          const k = 4.5; // Same as blue!
+          estimatedDistance = k / Math.sqrt(normalizedArea + 0.0001);
+          estimatedDistance = Math.max(10, Math.min(350, estimatedDistance));
+        }
         
         newDetectedObjects.push({
           color: colorKey as 'ball' | 'goal_blue' | 'goal_yellow',
