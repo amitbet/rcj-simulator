@@ -221,64 +221,38 @@ export const RobotCameraView: React.FC<RobotCameraViewProps> = ({ simulationStat
     h: number,
     maxDistance: number = 350
   ) => {
-    // For conical mirror view:
-    // - Angle determines position around the circle
-    // - Distance determines radius (closer objects appear nearer center, farther objects at edge)
-    // - Center shows field around robot, edges show horizon further out
+    // Simple empirical mapping to match the visual conical mirror output
+    // Not physics-based, just matching what we see on screen
     
-    // Convert angle from degrees to radians
-    // Note: In robot coordinates, 0° = forward (robot's front)
-    // The observation angle is already relative to robot's forward direction
-    // The shader handles robot rotation, so we use the angle directly
     const angleRad = (angleDeg * Math.PI) / 180;
     
-    // Center of circular mirror view
-    const centerX = 50; // percentage
-    const centerY = 50; // percentage
+    // Center of view
+    const centerX = 50;
+    const centerY = 50;
     
-    // Calculate radius based on distance
-    // Closer objects appear nearer center, farther objects at edge
-    // Normalize distance (0 to maxDistance -> 0 to 1)
+    // Map distance to radius empirically
+    // In conical mirror: objects at ALL distances are compressed into the view
+    // Need to tune this to match visual appearance
     const normalizedDistance = Math.min(distance / maxDistance, 1.0);
     
-    // Map distance to radius on circle
-    // For conical mirror: center (r=0) shows field around robot, edges (r=1) show horizon
-    // Closer objects = smaller radius (nearer center), farther objects = larger radius (nearer edge)
-    const maxRadius = 40; // Maximum radius percentage
-    const minRadius = 5; // Minimum radius (objects very close)
+    // Try: very close objects at edge, far objects more toward center
+    // Most objects on field are 50-200cm away, should fill most of the circle
+    const minRadius = 8;  // Far objects (200cm+) - closer to center
+    const maxRadius = 42; // Close objects (0-50cm) - near edge
+    const radius = maxRadius - (normalizedDistance * (maxRadius - minRadius));
     
-    // Closer objects = smaller radius (nearer center)
-    // Farther objects = larger radius (nearer edge)
-    const radius = minRadius + (maxRadius - minRadius) * normalizedDistance;
+    // Angle: 0° = forward = bottom (after 180° flip)
+    // User feedback: ball at bottom, rectangle at top = 180° off
+    // Fix: add π to flip by 180°
+    const screenAngle = angleRad - Math.PI / 2 + Math.PI; // = angleRad + Math.PI / 2
     
-    // Calculate position on circle
-    // Observation angle: 0° = forward, +90° = left, -90° = right, ±180° = back
-    // In shader: theta = atan(coord.y, coord.x) where:
-    //   top (y<0, x=0): theta = -π/2 -> forward (after rotation)
-    //   right (y=0, x>0): theta = 0 -> right side
-    //   bottom (y>0, x=0): theta = π/2 -> back
-    //   left (y=0, x<0): theta = π -> left side
-    // 
-    // The shader maps: theta + π/2 -> longitude, then longitude - π/2 -> longitudeAdjusted
-    // So: theta = -π/2 (top) -> longitudeAdjusted = 0 (forward)
-    // 
-    // For overlay: forward (0°) should be at top
-    // Map observation angle to screen angle: 0° (forward) -> -π/2 (top)
-    // Formula: displayAngle = angleRad - π/2
-    // This correctly maps: 0° -> -π/2 (top), 90° -> 0 (right), -90° -> -π (left), 180° -> π/2 (bottom)
-    const displayAngle = angleRad - Math.PI / 2;
+    const x = centerX + radius * Math.cos(screenAngle);
+    const y = centerY + radius * Math.sin(screenAngle);
     
-    const radiusX = Math.cos(displayAngle) * radius;
-    const radiusY = Math.sin(displayAngle) * radius;
-    
-    // Convert to percentage coordinates
-    const x = centerX + radiusX;
-    const y = centerY + radiusY;
-    
-    // Size scales with distance (smaller when farther)
-    const baseWidth = 8; // Base width percentage
-    const baseHeight = 8; // Base height percentage
-    const sizeScale = 1 - normalizedDistance * 0.5; // Smaller when farther
+    // Size based on distance - larger when closer, smaller when farther
+    const baseWidth = 10;  // Increased base size
+    const baseHeight = 8;
+    const sizeScale = 0.5 + (1 - normalizedDistance) * 0.5; // 0.5 to 1.0
     const width = baseWidth * sizeScale;
     const height = baseHeight * sizeScale;
     
