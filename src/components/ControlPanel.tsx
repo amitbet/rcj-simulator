@@ -12,8 +12,8 @@ interface ControlPanelProps {
   onReset: () => void;
   onResetMatch: () => void;
   onSpeedChange: (speed: number) => void;
-  onNewGame: () => void;
   onToggleDataSource: () => void;
+  onNewGame: () => void;
 }
 
 export const ControlPanel: React.FC<ControlPanelProps> = ({
@@ -24,8 +24,8 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
   onReset,
   onResetMatch,
   onSpeedChange,
-  onNewGame,
   onToggleDataSource,
+  onNewGame,
 }) => {
   return (
     <div className="panel-section control-panel">
@@ -61,29 +61,30 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
         <span className="speed-value">{speed.toFixed(1)}x</span>
       </div>
 
-      <div style={{ marginTop: '16px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+      <div style={{ marginTop: '16px', display: 'flex', gap: '8px', justifyContent: 'center' }}>
         <button
-          className={`btn ${useCameraData ? 'btn-secondary' : 'btn-primary'}`}
+          className={`btn btn-icon ${useCameraData ? 'btn-secondary' : 'btn-primary'}`}
           onClick={onToggleDataSource}
-          style={{ width: '100%' }}
           title={useCameraData ? 'Switch to physics data' : 'Switch to camera data'}
+          style={{ fontSize: '1.5rem' }}
         >
-          {useCameraData ? '📷 Camera Data' : '⚙️ Physics Data'}
+          {useCameraData ? '📷' : '⚙️'}
         </button>
         <button
-          className="btn btn-secondary"
+          className="btn btn-secondary btn-icon"
           onClick={onResetMatch}
-          style={{ width: '100%' }}
           title="Reset positions to starting positions (keeps score)"
+          style={{ fontSize: '1.5rem' }}
         >
-          Reset Match
+          🔄
         </button>
         <button
-          className="btn btn-secondary"
+          className="btn btn-secondary btn-icon"
           onClick={onNewGame}
-          style={{ width: '100%' }}
+          title="Return to game mode selection"
+          style={{ fontSize: '1.5rem' }}
         >
-          New Game
+          🏠
         </button>
       </div>
     </div>

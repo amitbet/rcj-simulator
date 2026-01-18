@@ -94,30 +94,10 @@ export const WorldView: React.FC<WorldViewProps> = ({
     </span>
   );
 
-  // Get strategy info for active tab
-  const strategyInfo = strategies[activeTab];
-  const formatLoadTime = (timestamp: number) => {
-    const date = new Date(timestamp);
-    const timeString = date.toLocaleTimeString();
-    const milliseconds = date.getMilliseconds().toString().padStart(3, '0');
-    return `${timeString}.${milliseconds}`;
-  };
-
   return (
     <div className="world-view">
       <h3 className="panel-section-title">Robot World View</h3>
       
-      {strategyInfo && (
-        <div className="strategy-info">
-          <div className="strategy-info-item">
-            <span>Script Hash:</span> <span className="strategy-hash">{strategyInfo.hash}</span>
-          </div>
-          <div className="strategy-info-item">
-            <span>Last Load:</span> <span>{formatLoadTime(strategyInfo.loadTime)}</span>
-          </div>
-        </div>
-      )}
-
       <div className="editor-tabs">
         {tabs.map(({ id, label, team }) => (
           <button

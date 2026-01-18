@@ -110,7 +110,7 @@ body {
 
 /* Side Panel */
 .side-panel {
-  width: 320px;
+  width: 500px;
   background: var(--bg-secondary);
   border-left: 1px solid var(--accent-dim);
   display: flex;
@@ -380,18 +380,23 @@ body {
   display: flex;
   gap: 4px;
   margin-bottom: 12px;
+  flex-wrap: wrap;
 }
 
 .editor-tab {
-  padding: 8px 16px;
+  padding: 6px 10px;
   background: var(--bg-tertiary);
   border: none;
   color: var(--text-secondary);
   font-family: var(--font-body);
-  font-size: 0.85rem;
+  font-size: 0.75rem;
   cursor: pointer;
   border-radius: var(--radius-sm) var(--radius-sm) 0 0;
   transition: all 0.2s ease;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+  text-align: center;
 }
 
 .editor-tab.active {

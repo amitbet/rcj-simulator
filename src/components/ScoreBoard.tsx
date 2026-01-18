@@ -91,10 +91,6 @@ export const ScoreBoard: React.FC<ScoreBoardProps> = ({
           <div className="info-label">Half</div>
           <div className="info-value">{half}</div>
         </div>
-        <div className="info-item" style={{ gridColumn: 'span 2' }}>
-          <div className="info-label">Status</div>
-          <div className={`info-value ${getPhaseClass()}`}>{getPhaseText()}</div>
-        </div>
       </div>
     </div>
   );

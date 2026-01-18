@@ -52,6 +52,7 @@ const App: React.FC = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const container3DRef = useRef<HTMLDivElement>(null);
   const animationRef = useRef<number>(0);
+  const renderActiveRef = useRef<boolean>(false);
 
   // Simple hash function for strategy code
   const hashString = (str: string): string => {
@@ -274,9 +275,24 @@ const App: React.FC = () => {
 
   // Render loop
   useEffect(() => {
-    if (showModeSelector || !simulationState) return;
+    if (showModeSelector || !simulationState) {
+      // Cancel any pending animation frame
+      renderActiveRef.current = false;
+      if (animationRef.current) {
+        cancelAnimationFrame(animationRef.current);
+        animationRef.current = 0;
+      }
+      return;
+    }
+
+    renderActiveRef.current = true;
 
     const render = () => {
+      // Stop if rendering is deactivated
+      if (!renderActiveRef.current) {
+        return;
+      }
+      
       if (simulationState) {
         if (viewMode === '2d' && renderer2DRef.current) {
           renderer2DRef.current.render(simulationState);
@@ -290,7 +306,11 @@ const App: React.FC = () => {
     animationRef.current = requestAnimationFrame(render);
 
     return () => {
-      cancelAnimationFrame(animationRef.current);
+      renderActiveRef.current = false;
+      if (animationRef.current) {
+        cancelAnimationFrame(animationRef.current);
+        animationRef.current = 0;
+      }
     };
   }, [showModeSelector, simulationState, viewMode]);
 
@@ -323,6 +343,11 @@ const App: React.FC = () => {
     if (simulationRef.current) {
       simulationRef.current.resetMatch();
     }
+  };
+
+  const handleNewGame = () => {
+    // Simply reload the page to return to game mode selection
+    window.location.reload();
   };
 
   const handleToggleDataSource = () => {
@@ -531,8 +556,8 @@ const App: React.FC = () => {
                 onReset={handleReset}
                 onResetMatch={handleResetMatch}
                 onSpeedChange={handleSpeedChange}
-                onNewGame={() => setShowModeSelector(true)}
                 onToggleDataSource={handleToggleDataSource}
+                onNewGame={handleNewGame}
               />
 
               <WorldView
