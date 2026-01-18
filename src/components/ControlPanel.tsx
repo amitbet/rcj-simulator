@@ -7,21 +7,25 @@ import React from 'react';
 interface ControlPanelProps {
   isPaused: boolean;
   speed: number;
+  useCameraData: boolean;
   onPlayPause: () => void;
   onReset: () => void;
   onResetMatch: () => void;
   onSpeedChange: (speed: number) => void;
   onNewGame: () => void;
+  onToggleDataSource: () => void;
 }
 
 export const ControlPanel: React.FC<ControlPanelProps> = ({
   isPaused,
   speed,
+  useCameraData,
   onPlayPause,
   onReset,
   onResetMatch,
   onSpeedChange,
   onNewGame,
+  onToggleDataSource,
 }) => {
   return (
     <div className="panel-section control-panel">
@@ -58,6 +62,14 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
       </div>
 
       <div style={{ marginTop: '16px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+        <button
+          className={`btn ${useCameraData ? 'btn-secondary' : 'btn-primary'}`}
+          onClick={onToggleDataSource}
+          style={{ width: '100%' }}
+          title={useCameraData ? 'Switch to physics data' : 'Switch to camera data'}
+        >
+          {useCameraData ? '📷 Camera Data' : '⚙️ Physics Data'}
+        </button>
         <button
           className="btn btn-secondary"
           onClick={onResetMatch}

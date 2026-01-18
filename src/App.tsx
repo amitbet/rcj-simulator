@@ -38,6 +38,7 @@ const App: React.FC = () => {
   const [isDragging, setIsDragging] = useState(false);
   const [dragTarget, setDragTarget] = useState<{ type: 'ball' | 'robot'; id?: string } | null>(null);
   const [use360View, setUse360View] = useState(false);
+  const [useCameraData, setUseCameraData] = useState(true); // Default to camera data
 
   // Strategies state with hashes for change detection
   const [strategies, setStrategies] = useState<Record<string, { code: string; hash: string; loadTime: number }>>({});
@@ -205,6 +206,8 @@ const App: React.FC = () => {
     };
 
     simulation.initialize(config);
+    // Set initial data source preference
+    simulation.setUseCameraData(useCameraData);
     simulation.setOnStateUpdate((state) => {
       setSimulationState(state);
       // Update world states
@@ -220,6 +223,13 @@ const App: React.FC = () => {
     setSimulationState(initialState);
     setWorldStates(simulation.getWorldStates());
   }, [strategies]);
+
+  // Sync useCameraData with simulation when it changes
+  useEffect(() => {
+    if (simulationRef.current) {
+      simulationRef.current.setUseCameraData(useCameraData);
+    }
+  }, [useCameraData]);
 
   // Handle mode selection - auto-start the simulation
   const handleModeSelect = (mode: GameMode) => {
@@ -312,6 +322,14 @@ const App: React.FC = () => {
   const handleResetMatch = () => {
     if (simulationRef.current) {
       simulationRef.current.resetMatch();
+    }
+  };
+
+  const handleToggleDataSource = () => {
+    const newValue = !useCameraData;
+    setUseCameraData(newValue);
+    if (simulationRef.current) {
+      simulationRef.current.setUseCameraData(newValue);
     }
   };
 
@@ -508,11 +526,13 @@ const App: React.FC = () => {
               <ControlPanel
                 isPaused={isPaused}
                 speed={speed}
+                useCameraData={useCameraData}
                 onPlayPause={handlePlayPause}
                 onReset={handleReset}
                 onResetMatch={handleResetMatch}
                 onSpeedChange={handleSpeedChange}
                 onNewGame={() => setShowModeSelector(true)}
+                onToggleDataSource={handleToggleDataSource}
               />
 
               <WorldView

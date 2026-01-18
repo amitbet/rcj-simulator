@@ -66,6 +66,9 @@ export class SimulationEngine {
     goal_yellow?: { distance: number; angle_deg: number };
   }> = new Map(); // robotId -> camera observations
 
+  // Toggle for using camera vs physics data for strategies
+  private useCameraData: boolean = true; // Default to camera data
+
   // Callbacks
   private onStateUpdate: ((state: SimulationState) => void) | null = null;
   private onGameEvent: ((event: string, data?: any) => void) | null = null;
@@ -427,49 +430,52 @@ export class SimulationEngine {
         robot.team === 'blue'
       );
 
-      // CRITICAL: Override with camera-based observations
-      // Strategies should ONLY use camera calculations, not physics data
-      // Camera observations map only contains detected objects (undetected objects are not in the map)
-      const cameraObs = this.cameraObservations.get(id);
-      
-      // Override ball observation with camera data (if camera has run for this robot)
-      if (cameraObs) {
-        // Ball: visible only if camera detected it
-        if (cameraObs.ball) {
-          worldState.ball.visible = true;
-          worldState.ball.distance = cameraObs.ball.distance;
-          worldState.ball.angle_deg = cameraObs.ball.angle_deg;
+      // Conditionally override with camera-based observations or use physics data
+      if (this.useCameraData) {
+        // Use camera-based observations (strategies use camera calculations)
+        // Camera observations map only contains detected objects (undetected objects are not in the map)
+        const cameraObs = this.cameraObservations.get(id);
+        
+        // Override ball observation with camera data (if camera has run for this robot)
+        if (cameraObs) {
+          // Ball: visible only if camera detected it
+          if (cameraObs.ball) {
+            worldState.ball.visible = true;
+            worldState.ball.distance = cameraObs.ball.distance;
+            worldState.ball.angle_deg = cameraObs.ball.angle_deg;
+          } else {
+            // Camera ran but didn't detect ball - set as not visible
+            worldState.ball.visible = false;
+          }
+          
+          // Blue goal: visible only if camera detected it
+          if (cameraObs.goal_blue) {
+            worldState.goal_blue.visible = true;
+            worldState.goal_blue.distance = cameraObs.goal_blue.distance;
+            worldState.goal_blue.angle_deg = cameraObs.goal_blue.angle_deg;
+          } else {
+            // Camera ran but didn't detect blue goal - set as not visible
+            worldState.goal_blue.visible = false;
+          }
+          
+          // Yellow goal: visible only if camera detected it
+          if (cameraObs.goal_yellow) {
+            worldState.goal_yellow.visible = true;
+            worldState.goal_yellow.distance = cameraObs.goal_yellow.distance;
+            worldState.goal_yellow.angle_deg = cameraObs.goal_yellow.angle_deg;
+          } else {
+            // Camera ran but didn't detect yellow goal - set as not visible
+            worldState.goal_yellow.visible = false;
+          }
         } else {
-          // Camera ran but didn't detect ball - set as not visible
+          // Camera hasn't run yet for this robot - mark all vision objects as not visible
+          // This ensures strategies only use camera data, never physics data for vision
           worldState.ball.visible = false;
-        }
-        
-        // Blue goal: visible only if camera detected it
-        if (cameraObs.goal_blue) {
-          worldState.goal_blue.visible = true;
-          worldState.goal_blue.distance = cameraObs.goal_blue.distance;
-          worldState.goal_blue.angle_deg = cameraObs.goal_blue.angle_deg;
-        } else {
-          // Camera ran but didn't detect blue goal - set as not visible
           worldState.goal_blue.visible = false;
-        }
-        
-        // Yellow goal: visible only if camera detected it
-        if (cameraObs.goal_yellow) {
-          worldState.goal_yellow.visible = true;
-          worldState.goal_yellow.distance = cameraObs.goal_yellow.distance;
-          worldState.goal_yellow.angle_deg = cameraObs.goal_yellow.angle_deg;
-        } else {
-          // Camera ran but didn't detect yellow goal - set as not visible
           worldState.goal_yellow.visible = false;
         }
-      } else {
-        // Camera hasn't run yet for this robot - mark all vision objects as not visible
-        // This ensures strategies only use camera data, never physics data for vision
-        worldState.ball.visible = false;
-        worldState.goal_blue.visible = false;
-        worldState.goal_yellow.visible = false;
       }
+      // If useCameraData is false, use physics-based observations (worldState from ObservationSystem)
 
       // Line crossing penalties disabled - robots can move freely
       // The checkLineCrossings call is disabled to allow free movement
@@ -997,6 +1003,16 @@ export class SimulationEngine {
   // Get physics engine (for rendering)
   getPhysicsEngine(): PhysicsEngine {
     return this.physics;
+  }
+
+  // Toggle between camera and physics data for strategies
+  setUseCameraData(useCamera: boolean): void {
+    this.useCameraData = useCamera;
+  }
+
+  // Get current data source setting
+  getUseCameraData(): boolean {
+    return this.useCameraData;
   }
 
   // Dispose
