@@ -108,10 +108,41 @@ export const ConicalMirrorShader = {
       // y = sin(elevation)
       // z = cos(elevation) * cos(azimuth)
       // 
-      // But we need to align with Three.js coordinate system and make top of view = forward
-      // Top of screen (theta = -π/2) should be forward (+Z)
-      // So we adjust: azimuth = theta + π/2 (rotate 90°)
-      float azimuth = theta + 1.5708; // +π/2 to make top = forward
+      // For conical mirror view orientation:
+      // - Bottom of screen (theta = π/2) should map to forward direction
+      // - Top of screen (theta = -π/2) should map to backward direction
+      // - Right of screen (theta = 0) should map to robot's right
+      // - Left of screen (theta = ±π) should map to robot's left
+      //
+      // In Three.js cube map: +Z is forward, +X is right, -Z is back, -X is left
+      // In standard spherical: azimuth=0 is +Z, azimuth=π/2 is +X, azimuth=π is -Z, azimuth=-π/2 is -X
+      //
+      // To make bottom = forward:
+      // theta = π/2 (bottom) -> azimuth = 0 (+Z forward)
+      // theta = 0 (right) -> azimuth = -π/2 (-X... wait that's left!)
+      //
+      // Let me reconsider. If we use spherical coords:
+      // azimuth = 0 means looking along +Z axis (forward)
+      // azimuth = π/2 means looking along +X axis (right)
+      // azimuth = π means looking along -Z axis (back)
+      // azimuth = 3π/2 or -π/2 means looking along -X axis (left)
+      //
+      // And theta (screen position):
+      // theta = 0 is right side of screen
+      // theta = π/2 is bottom of screen
+      // theta = π is left side of screen
+      // theta = -π/2 is top of screen
+      //
+      // Desired mapping:
+      // Bottom (θ=π/2) -> Forward (az=0)
+      // Right (θ=0) -> Robot's left (az=-π/2)
+      // Top (θ=-π/2) -> Back (az=π)
+      // Left (θ=π) -> Robot's right (az=π/2)
+      //
+      // This gives: azimuth = π/2 - theta
+      // But user says all see front=right, so let's rotate by -π/2:
+      // azimuth = π/2 - theta - π/2 = -theta
+      float azimuth = -theta;
       
       float cosElev = cos(elevation);
       vec3 direction = vec3(

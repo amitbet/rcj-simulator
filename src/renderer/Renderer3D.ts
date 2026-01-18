@@ -744,9 +744,10 @@ export class Renderer3D {
           const material = this.quadMesh.material as THREE.ShaderMaterial;
           if (material.uniforms) {
             material.uniforms.tDiffuse.value = this.cubeRenderTarget.texture;
-            // Pass robot's rotation to shader (physics: angle 0 => facing +X, render: rotation.y = -angle)
-            // So robotRotation in shader should be -robotState.angle to match
-            material.uniforms.robotRotation.value = -robotState.angle;
+            // Pass robot's rotation to shader
+            // Physics: angle 0 => facing +X, angle increases counter-clockwise
+            // We need to rotate the cube map sampling to match robot's heading
+            material.uniforms.robotRotation.value = robotState.angle;
           }
         }
       }
