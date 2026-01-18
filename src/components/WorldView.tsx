@@ -48,11 +48,44 @@ export const WorldView: React.FC<WorldViewProps> = ({
 
   const tabs = getTabs();
   const worldState = worldStates.get(activeTab);
+  
+  // Extract physics observations and camera detection status if available
+  const physicsObs = (worldState as any)?.physics_obs;
+  const cameraDetected = (worldState as any)?.camera_detected || {
+    ball: false,
+    goal_blue: false,
+    goal_yellow: false
+  };
 
-  const formatObservation = (obs: WorldState['ball']) => {
+  const formatObservation = (obs: WorldState['ball'], label: string = '') => {
     if (!obs.visible) return 'Not visible';
     // Ultra-compact format to ensure single line: distance@angle(conf)
     return `${obs.distance.toFixed(1)}cm@${obs.angle_deg.toFixed(1)}°(${obs.confidence.toFixed(2)})`;
+  };
+
+  const formatObservationWithPhysics = (
+    cameraObs: WorldState['ball'], 
+    physicsObs: WorldState['ball'],
+    cameraDetected: boolean
+  ) => {
+    if (!cameraObs.visible) return <span>Not visible</span>;
+    
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+        {cameraDetected ? (
+          <span style={{ color: 'var(--accent)', fontWeight: 600 }}>
+            📷 {cameraObs.distance.toFixed(1)}cm@{cameraObs.angle_deg.toFixed(1)}°
+          </span>
+        ) : (
+          <span style={{ color: 'var(--text-secondary)', fontSize: '0.85em', fontStyle: 'italic' }}>
+            📷 Not detected
+          </span>
+        )}
+        <span style={{ color: 'var(--text-secondary)', fontSize: '0.85em' }}>
+          🔬 {physicsObs.distance.toFixed(1)}cm@{physicsObs.angle_deg.toFixed(1)}°
+        </span>
+      </div>
+    );
   };
 
   const formatBoolean = (val: boolean) => (
@@ -124,15 +157,34 @@ export const WorldView: React.FC<WorldViewProps> = ({
 
           <div className="world-state-section">
             <h4>Vision</h4>
-            <div className="world-state-item">
-              <span>Ball:</span> <span>{formatObservation(worldState.ball)}</span>
-            </div>
-            <div className="world-state-item">
-              <span>Blue Goal:</span> <span>{formatObservation(worldState.goal_blue)}</span>
-            </div>
-            <div className="world-state-item">
-              <span>Yellow Goal:</span> <span>{formatObservation(worldState.goal_yellow)}</span>
-            </div>
+            {physicsObs ? (
+              <>
+                <div className="world-state-item" style={{ flexDirection: 'column', alignItems: 'flex-start' }}>
+                  <span style={{ marginBottom: '4px', fontWeight: 600 }}>Ball:</span>
+                  {formatObservationWithPhysics(worldState.ball, physicsObs.ball, cameraDetected.ball)}
+                </div>
+                <div className="world-state-item" style={{ flexDirection: 'column', alignItems: 'flex-start' }}>
+                  <span style={{ marginBottom: '4px', fontWeight: 600 }}>Blue Goal:</span>
+                  {formatObservationWithPhysics(worldState.goal_blue, physicsObs.goal_blue, cameraDetected.goal_blue)}
+                </div>
+                <div className="world-state-item" style={{ flexDirection: 'column', alignItems: 'flex-start' }}>
+                  <span style={{ marginBottom: '4px', fontWeight: 600 }}>Yellow Goal:</span>
+                  {formatObservationWithPhysics(worldState.goal_yellow, physicsObs.goal_yellow, cameraDetected.goal_yellow)}
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="world-state-item">
+                  <span>Ball:</span> <span>{formatObservation(worldState.ball)}</span>
+                </div>
+                <div className="world-state-item">
+                  <span>Blue Goal:</span> <span>{formatObservation(worldState.goal_blue)}</span>
+                </div>
+                <div className="world-state-item">
+                  <span>Yellow Goal:</span> <span>{formatObservation(worldState.goal_yellow)}</span>
+                </div>
+              </>
+            )}
           </div>
 
           <div className="world-state-section">

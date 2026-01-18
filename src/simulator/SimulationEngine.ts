@@ -59,6 +59,13 @@ export class SimulationEngine {
   private robotStates: Map<string, string> = new Map(); // robotId -> current state
   private robotTargets: Map<string, string> = new Map(); // robotId -> current target
 
+  // Camera-based observations (override physics-based observations)
+  private cameraObservations: Map<string, {
+    ball?: { distance: number; angle_deg: number };
+    goal_blue?: { distance: number; angle_deg: number };
+    goal_yellow?: { distance: number; angle_deg: number };
+  }> = new Map(); // robotId -> camera observations
+
   // Callbacks
   private onStateUpdate: ((state: SimulationState) => void) | null = null;
   private onGameEvent: ((event: string, data?: any) => void) | null = null;
@@ -856,6 +863,40 @@ export class SimulationEngine {
         robot.team === 'blue'
       );
       
+      // Store physics-based observations before overriding
+      const physicsObs = {
+        ball: { ...worldState.ball },
+        goal_blue: { ...worldState.goal_blue },
+        goal_yellow: { ...worldState.goal_yellow }
+      };
+      
+      // Override with camera-based observations if available
+      const cameraObs = this.cameraObservations.get(id);
+      if (cameraObs) {
+        if (cameraObs.ball && worldState.ball.visible) {
+          worldState.ball.distance = cameraObs.ball.distance;
+          worldState.ball.angle_deg = cameraObs.ball.angle_deg;
+        }
+        if (cameraObs.goal_blue && worldState.goal_blue.visible) {
+          worldState.goal_blue.distance = cameraObs.goal_blue.distance;
+          worldState.goal_blue.angle_deg = cameraObs.goal_blue.angle_deg;
+        }
+        if (cameraObs.goal_yellow && worldState.goal_yellow.visible) {
+          worldState.goal_yellow.distance = cameraObs.goal_yellow.distance;
+          worldState.goal_yellow.angle_deg = cameraObs.goal_yellow.angle_deg;
+        }
+      }
+      
+      // Attach physics observations for display purposes
+      (worldState as any).physics_obs = physicsObs;
+      
+      // Track which observations came from camera (for display)
+      (worldState as any).camera_detected = {
+        ball: !!cameraObs?.ball,
+        goal_blue: !!cameraObs?.goal_blue,
+        goal_yellow: !!cameraObs?.goal_yellow
+      };
+      
       // Include stored robot state and target if available
       const storedState = this.robotStates.get(id);
       if (storedState) {
@@ -870,6 +911,43 @@ export class SimulationEngine {
     }
 
     return worldStates;
+  }
+
+  // Update world state with camera-based observations
+  updateWorldStateFromCamera(
+    robotId: string, 
+    cameraObservations: {
+      ball?: { distance: number; angle_deg: number };
+      goal_blue?: { distance: number; angle_deg: number };
+      goal_yellow?: { distance: number; angle_deg: number };
+    },
+    detectionStatus: {
+      ballDetected: boolean;
+      blueGoalDetected: boolean;
+      yellowGoalDetected: boolean;
+    }
+  ): void {
+    // Get existing observations or create new
+    const existingObs = this.cameraObservations.get(robotId) || {};
+    
+    // Update only detected objects, clear undetected ones
+    const updatedObs: typeof existingObs = {};
+    
+    if (detectionStatus.ballDetected && cameraObservations.ball) {
+      updatedObs.ball = cameraObservations.ball;
+    }
+    // If not detected, don't include it (clears old observation)
+    
+    if (detectionStatus.blueGoalDetected && cameraObservations.goal_blue) {
+      updatedObs.goal_blue = cameraObservations.goal_blue;
+    }
+    
+    if (detectionStatus.yellowGoalDetected && cameraObservations.goal_yellow) {
+      updatedObs.goal_yellow = cameraObservations.goal_yellow;
+    }
+    
+    // Store updated observations - objects not detected won't have entries
+    this.cameraObservations.set(robotId, updatedObs);
   }
 
   // Get physics engine (for rendering)

@@ -21,6 +21,7 @@ interface DetectedObject {
   color: 'ball' | 'goal_blue' | 'goal_yellow';
   label: string;
   distance: number; // Estimated distance in cm
+  angle_deg: number; // Angle in degrees relative to robot forward
 }
 
 export const RobotCameraView: React.FC<RobotCameraViewProps> = ({ simulationState, simulationEngine, robotId }) => {
@@ -31,6 +32,7 @@ export const RobotCameraView: React.FC<RobotCameraViewProps> = ({ simulationStat
   const [debugMode, setDebugMode] = useState<number>(0); // Track current debug mode
   const [detectedObjects, setDetectedObjects] = useState<DetectedObject[]>([]);
   const animationRef = useRef<number>(0);
+  const frameCountRef = useRef<number>(0); // Frame counter for throttling detection
 
   // Get robot info
   const robot = simulationState?.robots.find(r => r.id === robotId);
@@ -82,7 +84,7 @@ export const RobotCameraView: React.FC<RobotCameraViewProps> = ({ simulationStat
     setWorldState(ws || null);
   }, [simulationState, robotId, simulationEngine]);
 
-  // Color detection function
+  // Color detection function - optimized for performance
   const detectColors = useCallback(() => {
     if (!canvasRef.current || !rendererRef.current) return;
 
@@ -125,9 +127,9 @@ export const RobotCameraView: React.FC<RobotCameraViewProps> = ({ simulationStat
       const mask = new Uint8Array(width * height);
       let totalPixels = 0;
       
-      // First pass: mark all matching pixels
-      for (let y = 0; y < height; y++) {
-        for (let x = 0; x < width; x++) {
+      // First pass: mark all matching pixels (sample every 4th pixel for speed)
+      for (let y = 0; y < height; y += 4) {
+        for (let x = 0; x < width; x += 4) {
           const idx = (y * width + x) * 4;
           const r = pixels[idx];
           const g = pixels[idx + 1];
@@ -154,49 +156,48 @@ export const RobotCameraView: React.FC<RobotCameraViewProps> = ({ simulationStat
         }
       }
 
-      // If enough pixels found, calculate bounding box
-      if (totalPixels > 10) {
-        // Apply simple erosion to remove noise (isolated pixels)
-        const eroded = new Uint8Array(width * height);
-        for (let y = 1; y < height - 1; y++) {
-          for (let x = 1; x < width - 1; x++) {
-            const idx = y * width + x;
-            if (mask[idx] === 1) {
-              // Check if at least 2 of 8 neighbors are also set
-              let neighbors = 0;
-              for (let dy = -1; dy <= 1; dy++) {
-                for (let dx = -1; dx <= 1; dx++) {
-                  if (dx === 0 && dy === 0) continue;
-                  if (mask[(y + dy) * width + (x + dx)] === 1) neighbors++;
-                }
-              }
-              if (neighbors >= 2) {
-                eroded[idx] = 1;
-              }
-            }
-          }
-        }
-        
-        // Find bounding box of eroded mask
+      // If enough pixels found, calculate bounding box (skip erosion for performance)
+      if (totalPixels > 5) {
+        // Find bounding box directly from mask (no erosion)
         let minX = width, minY = height, maxX = 0, maxY = 0;
-        let cleanPixelCount = 0;
         
         for (let y = 0; y < height; y++) {
           for (let x = 0; x < width; x++) {
-            if (eroded[y * width + x] === 1) {
+            if (mask[y * width + x] === 1) {
               minX = Math.min(minX, x);
               minY = Math.min(minY, y);
               maxX = Math.max(maxX, x);
               maxY = Math.max(maxY, y);
-              cleanPixelCount++;
             }
           }
         }
 
-      // If enough pixels remain after erosion, add bounding box
-      if (cleanPixelCount > 5) {
-        const boxWidth = maxX - minX;
+      // Calculate distance
+      const boxWidth = maxX - minX;
         const boxHeight = maxY - minY;
+        
+        // Calculate angle from bounding box position in circular view
+        // Object position in percentage (center = 50%, 50%)
+        const objCenterX = (minX + boxWidth / 2) / width * 100;
+        const objCenterY = (minY + boxHeight / 2) / height * 100;
+        
+        // Calculate angle relative to robot forward direction
+        // In circular view: bottom = forward (0°), left = 90°, top = 180°, right = -90°
+        const dx = objCenterX - 50; // Offset from center
+        const dy = objCenterY - 50; // Offset from center
+        
+        // Calculate angle (atan2 gives angle from positive x-axis)
+        const rawAngleRad = Math.atan2(dy, dx);
+        // Adjust so bottom of view = 0° (forward)
+        // atan2: right=0°, bottom=90°, left=180°, top=-90°
+        // We want: bottom=0°, left=90°, top=180°, right=-90°
+        // So: angle = rawAngle - 90°
+        const adjustedAngleRad = rawAngleRad - Math.PI / 2;
+        let angle_deg = adjustedAngleRad * 180 / Math.PI;
+        
+        // Normalize to -180 to 180 range
+        while (angle_deg > 180) angle_deg -= 360;
+        while (angle_deg < -180) angle_deg += 360;
         
         // Estimate distance based on bounding box size
         // CRITICAL: Larger area percentage = CLOSER = SMALLER distance number
@@ -233,16 +234,44 @@ export const RobotCameraView: React.FC<RobotCameraViewProps> = ({ simulationStat
           width: (boxWidth / width) * 100,
           height: (boxHeight / height) * 100,
           label: range.label,
-          distance: Math.round(estimatedDistance)
+          distance: Math.round(estimatedDistance),
+          angle_deg: Math.round(angle_deg)
         });
-      }
       }
     });
 
     setDetectedObjects(newDetectedObjects);
-  }, []);
 
-  // Render loop with color detection
+    // Update simulation engine with camera-based observations
+    if (simulationEngine) {
+      const cameraObservations: {
+        ball?: { distance: number; angle_deg: number };
+        goal_blue?: { distance: number; angle_deg: number };
+        goal_yellow?: { distance: number; angle_deg: number };
+      } = {};
+      
+      // Build observations from detected objects
+      newDetectedObjects.forEach(obj => {
+        if (obj.color === 'ball') {
+          cameraObservations.ball = { distance: obj.distance, angle_deg: obj.angle_deg };
+        } else if (obj.color === 'goal_blue') {
+          cameraObservations.goal_blue = { distance: obj.distance, angle_deg: obj.angle_deg };
+        } else if (obj.color === 'goal_yellow') {
+          cameraObservations.goal_yellow = { distance: obj.distance, angle_deg: obj.angle_deg };
+        }
+      });
+      
+      // IMPORTANT: If an object is not detected, explicitly mark it as not visible
+      // by passing null, which tells SimulationEngine to clear old observations
+      simulationEngine.updateWorldStateFromCamera(robotId, cameraObservations, {
+        ballDetected: newDetectedObjects.some(o => o.color === 'ball'),
+        blueGoalDetected: newDetectedObjects.some(o => o.color === 'goal_blue'),
+        yellowGoalDetected: newDetectedObjects.some(o => o.color === 'goal_yellow'),
+      });
+    }
+  }, [simulationEngine, robotId]);
+
+  // Render loop with throttled color detection
   useEffect(() => {
     if (!simulationState || !rendererRef.current) return;
 
@@ -250,15 +279,19 @@ export const RobotCameraView: React.FC<RobotCameraViewProps> = ({ simulationStat
       if (rendererRef.current && simulationState) {
         rendererRef.current.render(simulationState);
         
-        // Copy WebGL canvas to 2D canvas for color detection
-        const glCanvas = rendererRef.current.getCanvas();
-        if (glCanvas && canvasRef.current) {
-          const ctx = canvasRef.current.getContext('2d');
-          if (ctx) {
-            canvasRef.current.width = glCanvas.width;
-            canvasRef.current.height = glCanvas.height;
-            ctx.drawImage(glCanvas, 0, 0);
-            detectColors(); // Perform color detection
+        // Only run detection every 3rd frame for performance
+        frameCountRef.current++;
+        if (frameCountRef.current % 3 === 0) {
+          // Copy WebGL canvas to 2D canvas for color detection
+          const glCanvas = rendererRef.current.getCanvas();
+          if (glCanvas && canvasRef.current) {
+            const ctx = canvasRef.current.getContext('2d');
+            if (ctx) {
+              canvasRef.current.width = glCanvas.width;
+              canvasRef.current.height = glCanvas.height;
+              ctx.drawImage(glCanvas, 0, 0);
+              detectColors(); // Perform detection every 3rd frame
+            }
           }
         }
       }
