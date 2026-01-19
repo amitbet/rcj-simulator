@@ -12,6 +12,7 @@ import { ControlPanel } from './components/ControlPanel';
 import { ScoreBoard } from './components/ScoreBoard';
 import { WorldView } from './components/WorldView';
 import { RobotCameraView } from './components/RobotCameraView';
+import { MentalMapView } from './components/MentalMapView';
 
 // Strategy file paths - using dynamic imports
 // These will be updated by Vite HMR automatically
@@ -467,6 +468,26 @@ const App: React.FC = () => {
               />
             </div>
           ))}
+        </div>
+
+        {/* Mental Maps Grid */}
+        <div className="mental-maps-container">
+          {simulationState && worldStates && simulationState.robots.map((robot) => {
+            const worldState = worldStates.get(robot.id);
+            return (
+              <div key={robot.id} className="mental-map-item">
+                <div className="mental-map-header">
+                  {robot.team.toUpperCase()} {robot.role.toUpperCase()}
+                </div>
+                {worldState && (
+                  <MentalMapView 
+                    worldState={worldState} 
+                    robotHeading={worldState.heading_deg}
+                  />
+                )}
+              </div>
+            );
+          })}
         </div>
 
         <div className="simulator-container">

@@ -55,6 +55,27 @@ export interface WorldState {
   // Strategy state (optional, set by strategy)
   state?: string;           // current state machine state
   target?: string;          // current target (e.g., "ball", "blue goal", "yellow goal")
+  mentalMap?: {            // mental map / odometry data (optional, set by strategy)
+    blueGoal: { 
+      distance: number | null; 
+      angle_deg: number | null; 
+      lastSeen: number; 
+      confidence: number;
+      worldX?: number | null;  // Learned world X position (cm)
+      worldY?: number | null;  // Learned world Y position (cm)
+    };
+    yellowGoal: { 
+      distance: number | null; 
+      angle_deg: number | null; 
+      lastSeen: number; 
+      confidence: number;
+      worldX?: number | null;  // Learned world X position (cm)
+      worldY?: number | null;  // Learned world Y position (cm)
+    };
+    lastPosition: { x: number; y: number };
+    fieldCenter: { x: number; y: number };
+    fieldBounds: { width: number; height: number };
+  };
 }
 
 // Action output from strategy

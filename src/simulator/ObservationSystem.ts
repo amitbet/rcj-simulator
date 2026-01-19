@@ -40,10 +40,20 @@ export class ObservationSystem {
     const headingDeg = (angle * 180 / Math.PI + 360) % 360;
 
     // Calculate observations
+    // Debug: Log ball position occasionally
+    if (Math.random() < 0.01) { // Log 1% of the time
+      console.log(`[ObsSystem] Robot ${robotId} at (${x.toFixed(1)}, ${y.toFixed(1)}), Ball at (${physicsState.ball.x.toFixed(1)}, ${physicsState.ball.y.toFixed(1)})`);
+    }
+    
     const ballObs = this.calculateObservation(
       x, y, angle,
       physicsState.ball.x, physicsState.ball.y
     );
+    
+    // Debug: Log ball observation result occasionally
+    if (Math.random() < 0.01) {
+      console.log(`[ObsSystem] Robot ${robotId} ball obs: visible=${ballObs.visible}, distance=${ballObs.distance.toFixed(1)}, angle=${ballObs.angle_deg.toFixed(1)}`);
+    }
 
     // Goal positions (blue goal at top, yellow at bottom)
     const blueGoalObs = this.calculateObservation(
@@ -122,6 +132,12 @@ export class ObservationSystem {
     // With 360-degree camera, everything is always in field of view
     // Only distance matters for visibility
     const visible = distance <= this.MAX_DISTANCE;
+    
+    // Debug logging for ball (only log occasionally to avoid spam)
+    const isBall = Math.abs(targetX) < 10 && Math.abs(targetY) < 10; // Ball is near center
+    if (isBall && Math.random() < 0.01) { // Log 1% of the time
+      console.log(`[ObsSystem] Ball observation: distance=${distance.toFixed(1)}, MAX_DISTANCE=${this.MAX_DISTANCE}, visible=${visible}`);
+    }
 
     // Calculate confidence based on distance only (angle doesn't matter with 360 FOV)
     let confidence = 0;

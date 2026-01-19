@@ -50,6 +50,10 @@ export class StrategyExecutor {
       const Math_round = Math.round;
       const Math_PI = Math.PI;
       
+      // Console for debugging - expose console.log to strategies
+      // Note: In browser, console is available globally; in Node it might need to be passed
+      // For now, we'll try to use the global console if available
+      
       // Clamp helper
       function clamp(val, min, max) {
         return Math_max(min, Math_min(max, val));
@@ -64,7 +68,7 @@ export class StrategyExecutor {
       
       ${code}
       
-      // Return the strategy function wrapped to capture state and target
+      // Return the strategy function wrapped to capture state, target, and mentalMap
       if (typeof strategy === 'function') {
         const originalStrategy = strategy;
         return function(worldState) {
@@ -76,6 +80,10 @@ export class StrategyExecutor {
           // Attach currentTarget to result if it exists
           if (typeof currentTarget !== 'undefined') {
             result._target = currentTarget;
+          }
+          // Attach mentalMap to result if it exists
+          if (typeof mentalMap !== 'undefined') {
+            result._mentalMap = mentalMap;
           }
           return result;
         };
@@ -90,7 +98,7 @@ export class StrategyExecutor {
   }
 
   // Execute strategy for a robot
-  executeStrategy(robotId: string, worldState: WorldState): { action: Action; state?: string; target?: string } {
+  executeStrategy(robotId: string, worldState: WorldState): { action: Action; state?: string; target?: string; mentalMap?: any } {
     const strategyFunc = this.strategies.get(robotId);
     
     if (!strategyFunc) {
@@ -104,11 +112,12 @@ export class StrategyExecutor {
       // Validate action
       const action = this.validateAction(result);
       
-      // Extract state and target from result if they were attached
+      // Extract state, target, and mentalMap from result if they were attached
       const state = (result as any)._state;
       const target = (result as any)._target;
+      const mentalMap = (result as any)._mentalMap;
       
-      return { action, state, target };
+      return { action, state, target, mentalMap };
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       this.errors.set(robotId, `Runtime error: ${errorMessage}`);

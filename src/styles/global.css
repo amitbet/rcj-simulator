@@ -80,12 +80,41 @@ body {
 
 /* Camera Grid Container */
 .camera-grid-container {
-  width: 420px;
+  width: 350px;
   display: flex;
   flex-direction: column;
   background: var(--bg-secondary);
   border-right: 1px solid var(--accent-dim);
   overflow-y: auto;
+}
+
+/* Mental Maps Container */
+.mental-maps-container {
+  width: 200px;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-secondary);
+  border-right: 1px solid var(--accent-dim);
+  overflow-y: auto;
+  gap: 8px;
+  padding: 8px;
+}
+
+.mental-map-item {
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-sm);
+  padding: 4px;
+  border: 1px solid var(--accent-dim);
+}
+
+.mental-map-header {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--accent);
+  text-align: center;
+  margin-bottom: 4px;
+  padding: 2px;
+  border-bottom: 1px solid var(--accent-dim);
 }
 
 /* Simulator View */
@@ -110,7 +139,7 @@ body {
 
 /* Side Panel */
 .side-panel {
-  width: 500px;
+  width: 420px;
   background: var(--bg-secondary);
   border-left: 1px solid var(--accent-dim);
   display: flex;

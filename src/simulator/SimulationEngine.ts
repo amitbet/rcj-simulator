@@ -58,6 +58,7 @@ export class SimulationEngine {
   // Robot strategy states (for display)
   private robotStates: Map<string, string> = new Map(); // robotId -> current state
   private robotTargets: Map<string, string> = new Map(); // robotId -> current target
+  private robotMentalMaps: Map<string, any> = new Map(); // robotId -> mental map data
 
   // Camera-based observations (override physics-based observations)
   private cameraObservations: Map<string, {
@@ -325,6 +326,7 @@ export class SimulationEngine {
     // Clear robot strategy states (for display)
     this.robotStates.clear();
     this.robotTargets.clear();
+    this.robotMentalMaps.clear();
     
     // Reload strategies to reset their state machines (like power-on reset)
     this.loadStrategies();
@@ -430,11 +432,24 @@ export class SimulationEngine {
         robot.team === 'blue'
       );
 
+      // Log physics observations before override
+      if (id === robots.keys().next().value) { // Log for first robot only to avoid spam
+        console.log(`[SimEngine] Robot ${id}: useCameraData=${this.useCameraData}`);
+        console.log(`[SimEngine] Physics ball: visible=${worldState.ball.visible}, distance=${worldState.ball.distance.toFixed(1)}, angle=${worldState.ball.angle_deg.toFixed(1)}`);
+      }
+      
       // Conditionally override with camera-based observations or use physics data
       if (this.useCameraData) {
         // Use camera-based observations (strategies use camera calculations)
         // Camera observations map only contains detected objects (undetected objects are not in the map)
         const cameraObs = this.cameraObservations.get(id);
+        
+        if (id === robots.keys().next().value) {
+          console.log(`[SimEngine] Camera obs exists:`, !!cameraObs);
+          if (cameraObs) {
+            console.log(`[SimEngine] Camera ball:`, cameraObs.ball ? `visible, dist=${cameraObs.ball.distance.toFixed(1)}` : 'not detected');
+          }
+        }
         
         // Override ball observation with camera data (if camera has run for this robot)
         if (cameraObs) {
@@ -474,6 +489,12 @@ export class SimulationEngine {
           worldState.goal_blue.visible = false;
           worldState.goal_yellow.visible = false;
         }
+      } else {
+        // useCameraData is false - use physics-based observations directly
+        // worldState already contains physics observations from ObservationSystem
+        if (id === robots.keys().next().value) {
+          console.log(`[SimEngine] Using physics data - ball visible=${worldState.ball.visible}`);
+        }
       }
       // If useCameraData is false, use physics-based observations (worldState from ObservationSystem)
 
@@ -485,7 +506,7 @@ export class SimulationEngine {
       // }
 
       // Execute strategy (now using camera-based observations)
-      const { action, state, target } = this.strategyExecutor.executeStrategy(id, worldState);
+      const { action, state, target, mentalMap } = this.strategyExecutor.executeStrategy(id, worldState);
       
       // Store state and target for display
       if (state) {
@@ -495,6 +516,11 @@ export class SimulationEngine {
       if (target) {
         this.robotTargets.set(id, target);
         worldState.target = target;
+      }
+      // Store mental map for display
+      if (mentalMap) {
+        this.robotMentalMaps.set(id, mentalMap);
+        (worldState as any).mentalMap = mentalMap;
       }
       
       // Apply action to physics
@@ -955,6 +981,12 @@ export class SimulationEngine {
       const storedTarget = this.robotTargets.get(id);
       if (storedTarget) {
         worldState.target = storedTarget;
+      }
+      
+      // Include stored mental map if available
+      const storedMentalMap = this.robotMentalMaps.get(id);
+      if (storedMentalMap) {
+        (worldState as any).mentalMap = storedMentalMap;
       }
       
       worldStates.set(id, worldState);

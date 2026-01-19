@@ -18,8 +18,6 @@
 const STATE = {
   SEARCHING: 'SEARCHING',
   ATTACKING: 'ATTACKING',
-  UNCROSSING_LINE: 'UNCROSSING_LINE',
-  STUCK: 'STUCK',
   RESET_POSITION: 'RESET_POSITION'
 };
 
@@ -45,13 +43,17 @@ const BACKOFF_TARGET_CM = 10; // Move 10cm in opposite direction before resuming
 var resetEvents = []; // Array of { time: number, type: 'stuck' | 'uncrossing' }
 const RESET_EVENT_WINDOW_MS = 5000; // 5 seconds window
 const RESET_EVENT_THRESHOLD = 3; // Need 3 events within window to trigger reset
-var stuckEntryTime = null; // Track when we entered STUCK state to prevent rapid oscillation
-const MIN_STUCK_TIME_MS = 300; // Minimum time to stay in STUCK state before allowing exit
 var resetTargetGoalIsBlue = null; // true = blue goal, false = yellow goal, null = not set
 var resetDistanceMoved = 0; // Track distance moved toward target goal during RESET_POSITION (cm)
 var resetInitialDistance = null; // Initial distance to goal when entering RESET_POSITION
 var resetRotationAccumulated = 0; // Track accumulated rotation during RESET_POSITION (degrees)
 var resetLastHeading = null; // Track last heading to calculate rotation
+var resetStuckCount = 0; // Count consecutive calls without movement
+var resetCurrentDirection = -1; // -1 = backward, 1 = forward
+var resetLastSwitchTime = 0; // Time when we last switched direction
+const RESET_STUCK_THRESHOLD = 20; // Number of calls without movement before switching direction
+const RESET_MIN_SPEED_THRESHOLD = 2; // Minimum speed (cm/s) to count as moving
+const RESET_SWITCH_COOLDOWN_MS = 2000; // Minimum time between direction switches (ms)
 
 // Line sensor memory - remember when line was detected and direction
 var lineSensorMemory = {
@@ -69,9 +71,230 @@ var ownGoalTurnComplete = false;
 var distanceMovedToGoal = 0; // Track distance moved towards own goal
 const GOAL_ADVANCE_DISTANCE_CM = 50; // Move 50cm towards own goal
 
+// Mental map / Odometry system
+// Track goal positions in robot-relative coordinates (polar: distance, angle)
+// Establish fixed coordinate system based on goal observations
+var mentalMap = {
+  blueGoal: { 
+    distance: null, 
+    angle_deg: null, 
+    lastSeen: 0, 
+    confidence: 0,
+    worldX: null,  // Fixed world X position (cm) - locked when coordinate system established
+    worldY: null   // Fixed world Y position (cm) - locked when coordinate system established
+  },
+  yellowGoal: { 
+    distance: null, 
+    angle_deg: null, 
+    lastSeen: 0, 
+    confidence: 0,
+    worldX: null,  // Fixed world X position (cm) - locked when coordinate system established
+    worldY: null   // Fixed world Y position (cm) - locked when coordinate system established
+  },
+  lastHeading: null,
+  lastPosition: { x: 0, y: 0 }, // Robot position estimate (field-relative, cm)
+  fieldCenter: { x: 0, y: 0 }, // Calculated field center
+  fieldBounds: { width: 158, height: 219 }, // Field dimensions (cm)
+  coordinateSystemEstablished: false // True when goals are locked to fixed positions
+};
+
 function strategy(worldState) {
   const { ball, goal_blue, goal_yellow, we_are_blue, bumper_front, bumper_left, bumper_right, 
-          line_front, line_left, line_right, line_rear, stuck, t_ms, dt_s } = worldState;
+          line_front, line_left, line_right, line_rear, stuck, t_ms, dt_s, heading_deg, v_est } = worldState;
+  
+  // Update mental map with current observations and IMU data
+  // Convert heading to -180..180 range for consistency
+  let normalizedHeading = heading_deg;
+  while (normalizedHeading > 180) normalizedHeading -= 360;
+  while (normalizedHeading < -180) normalizedHeading += 360;
+  
+  const headingRad = (normalizedHeading * Math_PI) / 180;
+  const headingChange = mentalMap.lastHeading !== null ? normalizedHeading - mentalMap.lastHeading : 0;
+  
+  // Normalize heading change to -180..180
+  let normalizedHeadingChange = headingChange;
+  while (normalizedHeadingChange > 180) normalizedHeadingChange -= 360;
+  while (normalizedHeadingChange < -180) normalizedHeadingChange += 360;
+  
+  // Update goal observations in mental map (robot-relative: distance, angle)
+  if (goal_blue.visible) {
+    // Goal is visible - update directly
+    mentalMap.blueGoal.distance = goal_blue.distance;
+    mentalMap.blueGoal.angle_deg = goal_blue.angle_deg;
+    mentalMap.blueGoal.lastSeen = t_ms;
+    mentalMap.blueGoal.confidence = 1.0;
+  } else if (mentalMap.blueGoal.distance !== null && mentalMap.lastHeading !== null) {
+    // Goal not visible - update using dead reckoning
+    // Rotate the stored angle by the heading change
+    mentalMap.blueGoal.angle_deg = mentalMap.blueGoal.angle_deg - normalizedHeadingChange;
+    
+    // Confidence decays over time
+    const timeSinceSeen = t_ms - mentalMap.blueGoal.lastSeen;
+    mentalMap.blueGoal.confidence = Math_max(0, 1.0 - (timeSinceSeen / 5000)); // Decay over 5 seconds
+  }
+  
+  if (goal_yellow.visible) {
+    // Goal is visible - update directly
+    mentalMap.yellowGoal.distance = goal_yellow.distance;
+    mentalMap.yellowGoal.angle_deg = goal_yellow.angle_deg;
+    mentalMap.yellowGoal.lastSeen = t_ms;
+    mentalMap.yellowGoal.confidence = 1.0;
+  } else if (mentalMap.yellowGoal.distance !== null && mentalMap.lastHeading !== null) {
+    // Goal not visible - update using dead reckoning
+    mentalMap.yellowGoal.angle_deg = mentalMap.yellowGoal.angle_deg - normalizedHeadingChange;
+    
+    // Confidence decays over time
+    const timeSinceSeen = t_ms - mentalMap.yellowGoal.lastSeen;
+    mentalMap.yellowGoal.confidence = Math_max(0, 1.0 - (timeSinceSeen / 5000));
+  }
+  
+  // Establish fixed coordinate system and lock goals to known positions
+  // Known goal positions: Blue goal at (0, -113.2), Yellow goal at (0, 113.2)
+  const BLUE_GOAL_Y = -113.2; // Blue goal Y position (top/back of field)
+  const YELLOW_GOAL_Y = 113.2; // Yellow goal Y position (bottom/front of field)
+  const FIELD_LENGTH = 226.4; // Distance between goals (113.2 * 2)
+  
+  // Step 1: If first goal is seen, establish initial coordinate system
+  if (!mentalMap.coordinateSystemEstablished) {
+    if (goal_blue.visible) {
+      // First time seeing blue goal - establish coordinate system
+      // Place blue goal at its known position (back/home goal)
+      mentalMap.blueGoal.worldX = 0;
+      mentalMap.blueGoal.worldY = BLUE_GOAL_Y;
+      mentalMap.coordinateSystemEstablished = true;
+      
+      // Calculate robot position from blue goal
+      const goalAngleRad = (goal_blue.angle_deg * Math_PI) / 180;
+      const worldAngleRad = goalAngleRad + headingRad;
+      mentalMap.lastPosition.x = mentalMap.blueGoal.worldX - goal_blue.distance * Math_sin(worldAngleRad);
+      mentalMap.lastPosition.y = mentalMap.blueGoal.worldY - goal_blue.distance * Math_cos(worldAngleRad);
+    } else if (goal_yellow.visible) {
+      // First time seeing yellow goal - establish coordinate system
+      // Place yellow goal at its known position (front/opponent goal)
+      mentalMap.yellowGoal.worldX = 0;
+      mentalMap.yellowGoal.worldY = YELLOW_GOAL_Y;
+      mentalMap.coordinateSystemEstablished = true;
+      
+      // Calculate robot position from yellow goal
+      const goalAngleRad = (goal_yellow.angle_deg * Math_PI) / 180;
+      const worldAngleRad = goalAngleRad + headingRad;
+      mentalMap.lastPosition.x = mentalMap.yellowGoal.worldX - goal_yellow.distance * Math_sin(worldAngleRad);
+      mentalMap.lastPosition.y = mentalMap.yellowGoal.worldY - goal_yellow.distance * Math_cos(worldAngleRad);
+    }
+  }
+  
+  // Step 2: When both goals are visible, lock both to fixed positions and establish field scale
+  if (goal_blue.visible && goal_yellow.visible) {
+    const blueAngleRad = (goal_blue.angle_deg * Math_PI) / 180;
+    const yellowAngleRad = (goal_yellow.angle_deg * Math_PI) / 180;
+    
+    // Convert robot-relative goal positions to Cartesian
+    const blueRelX = goal_blue.distance * Math_sin(blueAngleRad);
+    const blueRelY = goal_blue.distance * Math_cos(blueAngleRad);
+    const yellowRelX = goal_yellow.distance * Math_sin(yellowAngleRad);
+    const yellowRelY = goal_yellow.distance * Math_cos(yellowAngleRad);
+    
+    // Calculate distance between goals in robot-relative space
+    const goalSeparationRel = Math_sqrt(
+      (blueRelX - yellowRelX) * (blueRelX - yellowRelX) + (blueRelY - yellowRelY) * (blueRelY - yellowRelY)
+    );
+    
+    // Lock both goals to their fixed positions
+    mentalMap.blueGoal.worldX = 0;
+    mentalMap.blueGoal.worldY = BLUE_GOAL_Y;
+    mentalMap.yellowGoal.worldX = 0;
+    mentalMap.yellowGoal.worldY = YELLOW_GOAL_Y;
+    mentalMap.coordinateSystemEstablished = true;
+    
+    // Use triangulation to calculate robot position from both fixed goal positions
+    const blueWorldAngleRad = blueAngleRad + headingRad;
+    const yellowWorldAngleRad = yellowAngleRad + headingRad;
+    
+    const robotXFromBlue = mentalMap.blueGoal.worldX - goal_blue.distance * Math_sin(blueWorldAngleRad);
+    const robotYFromBlue = mentalMap.blueGoal.worldY - goal_blue.distance * Math_cos(blueWorldAngleRad);
+    
+    const robotXFromYellow = mentalMap.yellowGoal.worldX - goal_yellow.distance * Math_sin(yellowWorldAngleRad);
+    const robotYFromYellow = mentalMap.yellowGoal.worldY - goal_yellow.distance * Math_cos(yellowWorldAngleRad);
+    
+    // Average the two estimates (triangulation)
+    mentalMap.lastPosition.x = (robotXFromBlue + robotXFromYellow) / 2;
+    mentalMap.lastPosition.y = (robotYFromBlue + robotYFromYellow) / 2;
+  } else if (goal_blue.visible && mentalMap.coordinateSystemEstablished) {
+    // Only blue goal visible, but coordinate system is established - use fixed position
+    const goalAngleRad = (goal_blue.angle_deg * Math_PI) / 180;
+    const worldAngleRad = goalAngleRad + headingRad;
+    mentalMap.blueGoal.worldX = 0;
+    mentalMap.blueGoal.worldY = BLUE_GOAL_Y;
+    
+    // Calculate robot position from blue goal using standard triangulation
+    mentalMap.lastPosition.x = mentalMap.blueGoal.worldX - goal_blue.distance * Math_sin(worldAngleRad);
+    mentalMap.lastPosition.y = mentalMap.blueGoal.worldY - goal_blue.distance * Math_cos(worldAngleRad);
+    
+    // For defenders seeing their own goal: use angle information to improve X position estimate
+    // When goal is behind us, the X position calculation is more sensitive to heading errors
+    // Use the fact that goal is at X=0 and the perpendicular component of distance
+    if (we_are_blue) {
+      // Blue defender seeing own goal (blue goal)
+      // Goal is at X=0, so our X offset is the perpendicular distance
+      // X = distance * sin(robot-relative angle) when goal is at X=0
+      // This is more stable than using world angle when goal is behind
+      const absGoalAngle = Math_abs(goal_blue.angle_deg);
+      if (absGoalAngle > 45) {
+        // Goal is to the side or behind - use perpendicular component for X
+        // This reduces sensitivity to heading errors
+        const perpX = goal_blue.distance * Math_sin(goalAngleRad);
+        // Blend with calculated X position (weighted by angle - more weight when goal is more to the side)
+        const angleWeight = Math_min(1.0, (absGoalAngle - 45) / 45); // 0 at 45°, 1 at 90°+
+        mentalMap.lastPosition.x = (1 - angleWeight) * mentalMap.lastPosition.x + angleWeight * perpX;
+      }
+    }
+  } else if (goal_yellow.visible && mentalMap.coordinateSystemEstablished) {
+    // Only yellow goal visible, but coordinate system is established - use fixed position
+    const goalAngleRad = (goal_yellow.angle_deg * Math_PI) / 180;
+    const worldAngleRad = goalAngleRad + headingRad;
+    mentalMap.yellowGoal.worldX = 0;
+    mentalMap.yellowGoal.worldY = YELLOW_GOAL_Y;
+    
+    // Calculate robot position from yellow goal using standard triangulation
+    mentalMap.lastPosition.x = mentalMap.yellowGoal.worldX - goal_yellow.distance * Math_sin(worldAngleRad);
+    mentalMap.lastPosition.y = mentalMap.yellowGoal.worldY - goal_yellow.distance * Math_cos(worldAngleRad);
+    
+    // For defenders seeing their own goal: use angle information to improve X position estimate
+    if (!we_are_blue) {
+      // Yellow defender seeing own goal (yellow goal)
+      const absGoalAngle = Math_abs(goal_yellow.angle_deg);
+      if (absGoalAngle > 45) {
+        // Goal is to the side or behind - use perpendicular component for X
+        const perpX = goal_yellow.distance * Math_sin(goalAngleRad);
+        // Blend with calculated X position (weighted by angle)
+        const angleWeight = Math_min(1.0, (absGoalAngle - 45) / 45);
+        mentalMap.lastPosition.x = (1 - angleWeight) * mentalMap.lastPosition.x + angleWeight * perpX;
+      }
+    }
+  }
+  // If coordinate system not established and no goals visible, keep last position estimate
+  
+  // Calculate field center from mental map
+  // Field center is midpoint between goals (in robot-relative coordinates)
+  if (mentalMap.blueGoal.distance !== null && mentalMap.yellowGoal.distance !== null) {
+    // Convert goal positions to robot-relative coordinates
+    // Note: angle_deg is already robot-relative (0° = forward, 90° = right)
+    const blueAngleRad = (mentalMap.blueGoal.angle_deg * Math_PI) / 180;
+    const yellowAngleRad = (mentalMap.yellowGoal.angle_deg * Math_PI) / 180;
+    
+    // Calculate goal positions relative to robot (robot at origin, facing forward = +Y)
+    const blueGoalRelX = mentalMap.blueGoal.distance * Math_sin(blueAngleRad);
+    const blueGoalRelY = mentalMap.blueGoal.distance * Math_cos(blueAngleRad);
+    const yellowGoalRelX = mentalMap.yellowGoal.distance * Math_sin(yellowAngleRad);
+    const yellowGoalRelY = mentalMap.yellowGoal.distance * Math_cos(yellowAngleRad);
+    
+    // Field center is midpoint (robot-relative)
+    mentalMap.fieldCenter.x = (blueGoalRelX + yellowGoalRelX) / 2;
+    mentalMap.fieldCenter.y = (blueGoalRelY + yellowGoalRelY) / 2;
+  }
+  
+  // Update last heading for next iteration
+  mentalMap.lastHeading = normalizedHeading;
   
   // Target goal (opponent's goal - where we want to kick the ball)
   const targetGoal = we_are_blue ? goal_yellow : goal_blue;
@@ -107,103 +330,187 @@ function strategy(worldState) {
   }
   
   // ============================================================
-  // STATE: RESET_POSITION (Ignore all lines, navigate to furthest goal)
+  // STATE: RESET_POSITION (Navigate to middle of field using mental map)
   // ============================================================
   if (currentState === STATE.RESET_POSITION) {
     // Ignore all line detection
     ignoreLineDetection = true;
     
-    // Lock onto the furthest goal when first entering this state
-    if (resetTargetGoalIsBlue === null) {
-      // Find the goal that is furthest from the robot's current position
-      // Compare distances (always calculated, even if not visible)
-      if (goal_blue.distance > goal_yellow.distance) {
-        resetTargetGoalIsBlue = true;
-        currentTarget = 'blue goal';
-        resetInitialDistance = goal_blue.distance;
-      } else {
-        resetTargetGoalIsBlue = false;
-        currentTarget = 'yellow goal';
-        resetInitialDistance = goal_yellow.distance;
-      }
-      // Reset rotation tracking (not needed for omni but kept for compatibility)
-      resetRotationAccumulated = 0;
-      resetLastHeading = null;
-      resetDistanceMoved = 0; // Reset distance tracking
+    // Set target for display
+    currentTarget = null;
+    
+    // Use mental map to navigate to field center
+    // Calculate angle and distance to field center
+    let targetAngle = 0;
+    let targetDistance = 0;
+    let hasValidMap = false;
+    
+    if (mentalMap.blueGoal.distance !== null && mentalMap.yellowGoal.distance !== null) {
+      // We have both goals in memory - calculate center
+      const centerRelX = mentalMap.fieldCenter.x;
+      const centerRelY = mentalMap.fieldCenter.y;
+      targetDistance = Math_sqrt(centerRelX * centerRelX + centerRelY * centerRelY);
+      targetAngle = Math_atan2(centerRelX, centerRelY) * 180 / Math_PI;
+      hasValidMap = true;
+      currentTarget = 'field center (map)';
+    } else if (goal_blue.visible && goal_yellow.visible) {
+      // Both goals visible - calculate center directly
+      const blueAngleRad = (goal_blue.angle_deg * Math_PI) / 180;
+      const yellowAngleRad = (goal_yellow.angle_deg * Math_PI) / 180;
+      const blueGoalRelX = goal_blue.distance * Math_sin(blueAngleRad);
+      const blueGoalRelY = goal_blue.distance * Math_cos(blueAngleRad);
+      const yellowGoalRelX = goal_yellow.distance * Math_sin(yellowAngleRad);
+      const yellowGoalRelY = goal_yellow.distance * Math_cos(yellowAngleRad);
+      
+      const centerRelX = (blueGoalRelX + yellowGoalRelX) / 2;
+      const centerRelY = (blueGoalRelY + yellowGoalRelY) / 2;
+      targetDistance = Math_sqrt(centerRelX * centerRelX + centerRelY * centerRelY);
+      targetAngle = Math_atan2(centerRelX, centerRelY) * 180 / Math_PI;
+      hasValidMap = true;
+      currentTarget = 'field center';
+    } else if (mentalMap.blueGoal.distance !== null || mentalMap.yellowGoal.distance !== null) {
+      // Only one goal in memory - navigate toward estimated center
+      // Field center is roughly halfway between goals
+      // If we only see one goal, assume center is ~110cm away from that goal
+      const knownGoal = mentalMap.blueGoal.distance !== null ? mentalMap.blueGoal : mentalMap.yellowGoal;
+      const knownGoalDist = knownGoal.distance;
+      const knownGoalAngle = knownGoal.angle_deg;
+      
+      // Estimate center as being perpendicular to goal direction
+      // Center should be roughly 110cm from goal (half field height)
+      targetAngle = knownGoalAngle + (knownGoalAngle > 0 ? -90 : 90);
+      targetDistance = Math_abs(knownGoalDist - 110); // Distance to center
+      hasValidMap = true;
+      currentTarget = 'field center (estimated)';
     }
     
-    // Always set target to goal (never ball) in RESET_POSITION
-    currentTarget = resetTargetGoalIsBlue ? 'blue goal' : 'yellow goal';
+    // Exit condition: must be in midfield (Y ≈ 0) and not on sideline (X reasonable)
+    // Only exit when robot is truly in the midfield, not just close to center
+    const MIDFIELD_Y_THRESHOLD = 30; // cm - must be within 30cm of midfield line (Y=0)
+    const MIDFIELD_X_THRESHOLD = 60; // cm - must be within 60cm of center line (X=0) - not on sideline
     
-    // Get fresh distance from current goal observations (they update each frame)
-    const furthestGoalDist = resetTargetGoalIsBlue ? goal_blue.distance : goal_yellow.distance;
-    const furthestGoalVis = resetTargetGoalIsBlue ? goal_blue.visible : goal_yellow.visible;
-    const furthestGoalAngle = resetTargetGoalIsBlue ? goal_blue.angle_deg : goal_yellow.angle_deg;
-    
-    // Calculate distance moved toward goal (difference from initial distance)
-    // Only update if goal is visible - if not visible, keep last known value
-    if (resetInitialDistance !== null && furthestGoalVis) {
-      resetDistanceMoved = resetInitialDistance - furthestGoalDist;
-      // Ensure distance moved is non-negative (we're moving toward goal, not away)
-      if (resetDistanceMoved < 0) {
-        resetDistanceMoved = 0; // Reset if we somehow moved away
+    // Check if we're in the midfield using world coordinates
+    let isInMidfield = false;
+    if (mentalMap.coordinateSystemEstablished) {
+      // Use world coordinates to check if we're in midfield
+      const robotY = mentalMap.lastPosition.y;
+      const robotX = Math_abs(mentalMap.lastPosition.x);
+      isInMidfield = Math_abs(robotY) < MIDFIELD_Y_THRESHOLD && robotX < MIDFIELD_X_THRESHOLD;
+    } else if (hasValidMap && targetDistance < 30) {
+      // Fallback: if coordinate system not established, use distance to center
+      // But require both goals visible to ensure we're not on sideline
+      if (goal_blue.visible && goal_yellow.visible) {
+        isInMidfield = true;
       }
     }
     
-    
-    // Exit reset after moving 60cm toward the target goal
-    // REMOVED fallback condition - we should only exit after moving 60cm, not when reaching goal
-    // This ensures we move exactly 60cm toward the goal, regardless of how close we get
-    if (resetDistanceMoved >= 60) {
+    if (isInMidfield) {
       ignoreLineDetection = false;
-      resetEvents = []; // Clear reset events
-      resetTargetGoalIsBlue = null; // Clear locked goal
+      resetEvents = [];
+      resetTargetGoalIsBlue = null;
       resetRotationAccumulated = 0;
       resetLastHeading = null;
       resetDistanceMoved = 0;
       resetInitialDistance = null;
-      // Transition to ATTACKING state (attacker preference)
+      resetStuckCount = 0;
+      resetCurrentDirection = -1;
+      resetLastSwitchTime = 0;
       currentState = STATE.ATTACKING;
       return { motor1, motor2, motor3, motor4, kick };
     }
     
-    // Move toward goal using differential drive (turn + forward)
-    // Physics engine uses differential drive, not true omnidirectional
-    if (furthestGoalVis) {
-      // Goal is visible - turn toward it and move forward
-      const goalAngle = furthestGoalAngle;
-      const goalDist = furthestGoalDist;
-      const absAngle = Math_abs(goalAngle);
+    // Strategy: Navigate to field center using mental map
+    // PRIORITY 1: If hitting a wall or stuck, move away from it first
+    // Check for multiple bumpers (corner situation) - always back up first
+    const isStuckOnWall = bumper_front || bumper_left || bumper_right || stuck;
+    const multipleBumpers = (bumper_front && (bumper_left || bumper_right)) || (bumper_left && bumper_right);
+    
+    if (isStuckOnWall || multipleBumpers) {
+      // CRITICAL: When stuck on wall(s), always back up first, then turn away
+      let backAwayAngle = 180; // Default: straight back
       
-      // If goal is behind (>90° or <-90°), turn in place first
-      if (absAngle > 90) {
-        // Turn in place (no forward movement) - goal is behind
-        const turnSpeed = clamp(goalAngle / 60, -1, 1) * 0.8; // Slower turn when behind
-        
-        motor1 = -turnSpeed; // Left side
-        motor4 = -turnSpeed;
-        motor2 = turnSpeed; // Right side
-        motor3 = turnSpeed;
-      } else if (absAngle > 15) {
-        // Goal is to the side - turn while moving forward slowly
-        const turnSpeed = clamp(goalAngle / 50, -1, 1) * 0.6;
-        const forwardSpeed = 0.4; // Moderate forward speed while turning
-        
-        motor1 = forwardSpeed - turnSpeed; // Left side
-        motor4 = forwardSpeed - turnSpeed;
-        motor2 = forwardSpeed + turnSpeed; // Right side
-        motor3 = forwardSpeed + turnSpeed;
-      } else {
-        // Goal is aligned - move straight forward
-        const forwardSpeed = 0.7;
-        motor1 = forwardSpeed;
-        motor2 = forwardSpeed;
-        motor3 = forwardSpeed;
-        motor4 = forwardSpeed;
+      if (multipleBumpers) {
+        // Corner situation - back up and turn away from corner
+        if (bumper_front && bumper_left) {
+          // Front-left corner - back up and turn right
+          backAwayAngle = 135; // Back-right
+        } else if (bumper_front && bumper_right) {
+          // Front-right corner - back up and turn left
+          backAwayAngle = -135; // Back-left
+        } else if (bumper_left && bumper_right) {
+          // Both sides - just back up straight
+          backAwayAngle = 180;
+        } else {
+          // Front + stuck - back up straight
+          backAwayAngle = 180;
+        }
+        currentTarget = 'away from corner';
+      } else if (bumper_front || (stuck && Math_abs(heading_deg) < 45)) {
+        // Front wall - back up straight
+        backAwayAngle = 180;
+        currentTarget = 'away from front wall';
+      } else if (bumper_left || (stuck && heading_deg > 45 && heading_deg < 135)) {
+        // Left wall - back up and turn right
+        backAwayAngle = 135; // Back-right
+        currentTarget = 'away from left wall';
+      } else if (bumper_right || (stuck && (heading_deg > 135 || heading_deg < -135 || (heading_deg < -45 && heading_deg > -135)))) {
+        // Right wall - back up and turn left
+        backAwayAngle = -135; // Back-left
+        currentTarget = 'away from right wall';
       }
+      
+      // Always move backward when stuck on wall - more aggressive
+      const backwardSpeed = -0.7; // Stronger backward speed
+      const backAwayAngleRad = (backAwayAngle * Math_PI) / 180;
+      const turnSpeed = clamp(Math_sin(backAwayAngleRad) * 0.8, -0.8, 0.8); // Turn component
+      
+      motor1 = backwardSpeed - turnSpeed;
+      motor4 = backwardSpeed - turnSpeed;
+      motor2 = backwardSpeed + turnSpeed;
+      motor3 = backwardSpeed + turnSpeed;
+      
+      return { motor1, motor2, motor3, motor4, kick };
+    }
+    
+    // No wall contact - use normal navigation
+    if (!hasValidMap) {
+      // No valid map - use fallback strategy
+      if (goal_blue.visible || goal_yellow.visible) {
+        // At least one goal visible - try to get both
+        const visibleGoal = goal_blue.visible ? goal_blue : goal_yellow;
+        targetAngle = visibleGoal.angle_deg;
+        currentTarget = goal_blue.visible ? 'blue goal' : 'yellow goal';
+      } else {
+        // No goals visible and no map - move backward
+        targetAngle = 180;
+        currentTarget = 'searching';
+      }
+    }
+    // Otherwise use the targetAngle calculated from mental map above
+    
+    // Navigate toward target angle
+    const absAngle = Math_abs(targetAngle);
+    
+    // If target is behind (>90° or <-90°), move backward while turning
+    if (absAngle > 90) {
+      // Move backward while turning toward target
+      const turnSpeed = clamp(targetAngle / 60, -1, 1) * 0.6;
+      const backwardSpeed = -0.5; // Negative = backward
+      motor1 = backwardSpeed - turnSpeed;
+      motor4 = backwardSpeed - turnSpeed;
+      motor2 = backwardSpeed + turnSpeed;
+      motor3 = backwardSpeed + turnSpeed;
+    } else if (absAngle > 15) {
+      // Target is to the side - turn while moving forward
+      const turnSpeed = clamp(targetAngle / 50, -1, 1) * 0.6;
+      const forwardSpeed = 0.5;
+      motor1 = forwardSpeed - turnSpeed;
+      motor4 = forwardSpeed - turnSpeed;
+      motor2 = forwardSpeed + turnSpeed;
+      motor3 = forwardSpeed + turnSpeed;
     } else {
-      // Goal not visible - move forward in current direction (should become visible soon with 360 camera)
-      const forwardSpeed = 0.6;
+      // Target is aligned - move straight forward
+      const forwardSpeed = 0.7;
       motor1 = forwardSpeed;
       motor2 = forwardSpeed;
       motor3 = forwardSpeed;
@@ -214,94 +521,7 @@ function strategy(worldState) {
   }
   
   // ============================================================
-  // STATE: UNCROSSING_LINE (Highest Priority)
-  // ============================================================
-  if (currentState === STATE.UNCROSSING_LINE) {
-    // Ignore all line detection while uncrossing
-    ignoreLineDetection = true;
-    
-    // Set target for display
-    currentTarget = null;
-    
-    // Remove events older than window (event was already recorded when entering this state)
-    resetEvents = resetEvents.filter(e => t_ms - e.time < RESET_EVENT_WINDOW_MS);
-    
-    // Check if we should go to RESET_POSITION
-    // CRITICAL: Don't enter RESET_POSITION if ball is visible and close - prioritize attacking!
-    // Attackers should only reset when truly stuck, not when they can see the ball
-    const ballVisibleAndClose = ball.visible && ball.distance < 80; // Ball within 80cm
-    
-    // Count event types for debugging
-    const stuckCount = resetEvents.filter(e => e.type === 'stuck').length;
-    const uncrossingCount = resetEvents.filter(e => e.type === 'uncrossing').length;
-    
-    
-    // Enter RESET_POSITION if we have 3+ uncrossing events (regardless of ball visibility)
-    // This ensures we reset after multiple line crossings
-    if (uncrossingCount >= RESET_EVENT_THRESHOLD) {
-      currentState = STATE.RESET_POSITION;
-      ignoreLineDetection = true;
-      resetEvents = []; // Clear events
-      resetRotationAccumulated = 0;
-      resetLastHeading = null;
-      resetDistanceMoved = 0;
-      // Set target immediately to furthest goal (never ball) and initialize distance tracking
-      if (goal_blue.distance > goal_yellow.distance) {
-        resetTargetGoalIsBlue = true;
-        currentTarget = 'blue goal';
-        resetInitialDistance = goal_blue.distance; // CRITICAL: Set initial distance here
-      } else {
-        resetTargetGoalIsBlue = false;
-        currentTarget = 'yellow goal';
-        resetInitialDistance = goal_yellow.distance; // CRITICAL: Set initial distance here
-      }
-      return { motor1, motor2, motor3, motor4, kick };
-  }
-  
-    // Estimate distance moved based on speed and time
-    const BACKOFF_MOTOR_VALUE = 0.6;
-    const BACKOFF_SPEED_CM_S = BACKOFF_MOTOR_VALUE * 150; // motor value * max speed
-    backoffDistance += BACKOFF_SPEED_CM_S * dt_s;
-    
-    // Continue reversing until we've moved 10cm
-    if (backoffDistance >= BACKOFF_TARGET_CM) {
-      // Done reversing - clear line memory and transition back to previous state
-      backoffDistance = 0;
-      ignoreLineDetection = false;
-      lineSensorMemory = {
-        front: { active: false, direction: null },
-        left: { active: false, direction: null },
-        right: { active: false, direction: null },
-        rear: { active: false, direction: null }
-      };
-      // Reset lastLineState to all false - we ignored all line sensors during reverse
-      lastLineState = { front: false, left: false, right: false, rear: false };
-      
-      // Transition back to attacking or searching based on ball visibility
-      if (ball.visible) {
-        currentState = STATE.ATTACKING;
-      } else {
-        currentState = STATE.SEARCHING;
-      }
-    } else {
-      // Still reversing - continue moving in opposite direction
-      const forwardSpeed = reverseDirection.y * BACKOFF_MOTOR_VALUE;
-      const strafeSpeed = reverseDirection.x * BACKOFF_MOTOR_VALUE * 0.7;
-      
-      if (Math_abs(strafeSpeed) > 0.1) {
-        setMotors(strafeSpeed, -strafeSpeed, strafeSpeed, -strafeSpeed);
-      }
-      if (Math_abs(forwardSpeed) > 0.1) {
-        drive(forwardSpeed);
-      }
-      
-      // CRITICAL: ALL line detection logic is disabled while reversing
-    return { motor1, motor2, motor3, motor4, kick };
-    }
-  }
-  
-  // ============================================================
-  // LINE DETECTION (Check for line crossing - triggers UNCROSSING_LINE state)
+  // LINE DETECTION (Check for line crossing - triggers RESET_POSITION state)
   // Skip if line detection is disabled
   // ============================================================
   if (!ignoreLineDetection) {
@@ -360,49 +580,30 @@ function strategy(worldState) {
         }
       }
       
-      // If sensor goes to 0 (off) while still in memory, trigger UNCROSSING_LINE state
+      // If sensor goes to 0 (off) while still in memory, trigger RESET_POSITION state
       if (!sensor.value && memory.active) {
         // Sensor went off before direction changed - line was crossed
-        // Transition directly to UNCROSSING_LINE state
-        backoffDistance = 0;
-        
-        // Determine reverse direction based on which sensor triggered
-        if (sensor.name === 'front') {
-          reverseDirection = { x: 0, y: -1 }; // Back away
-        } else if (sensor.name === 'rear') {
-          reverseDirection = { x: 0, y: 1 }; // Move forward
-        } else if (sensor.name === 'left') {
-          reverseDirection = { x: 1, y: 0 }; // Move right
-        } else if (sensor.name === 'right') {
-          reverseDirection = { x: -1, y: 0 }; // Move left
-        }
-        
-        // Clear memory for this sensor
+        // Transition directly to RESET_POSITION state
         memory.active = false;
         memory.direction = null;
         
-        // Transition to UNCROSSING_LINE state
-        currentState = STATE.UNCROSSING_LINE;
-        
-        // Record uncrossing event (only once when entering this state)
+        // Record uncrossing event
         resetEvents.push({ time: t_ms, type: 'uncrossing' });
         // Remove events older than window
         resetEvents = resetEvents.filter(e => t_ms - e.time < RESET_EVENT_WINDOW_MS);
         
+        // Transition to RESET_POSITION state
+        currentState = STATE.RESET_POSITION;
+        ignoreLineDetection = true;
+        resetRotationAccumulated = 0;
+        resetLastHeading = null;
+        resetDistanceMoved = 0;
+        resetInitialDistance = null;
+        resetStuckCount = 0;
+        resetCurrentDirection = -1;
+        resetLastSwitchTime = 0;
         
-        // Start reversing immediately
-        const BACKOFF_MOTOR_VALUE = 0.6;
-        const forwardSpeed = reverseDirection.y * BACKOFF_MOTOR_VALUE;
-        const strafeSpeed = reverseDirection.x * BACKOFF_MOTOR_VALUE * 0.7;
-        
-        if (Math_abs(strafeSpeed) > 0.1) {
-          setMotors(strafeSpeed, -strafeSpeed, strafeSpeed, -strafeSpeed);
-        }
-        if (Math_abs(forwardSpeed) > 0.1) {
-          drive(forwardSpeed);
-        }
-        
-    return { motor1, motor2, motor3, motor4, kick };
+        return { motor1, motor2, motor3, motor4, kick };
       }
     }
     
@@ -410,112 +611,28 @@ function strategy(worldState) {
     lastLineState = { front: line_front, left: line_left, right: line_right, rear: line_rear };
   }
   
-  // ============================================================
-  // STATE: STUCK (Bumper/Wall contact) - Check BEFORE other states
-  // ============================================================
-  // Check if we're currently in STUCK state
-  if (currentState === STATE.STUCK) {
-    // Ignore all line detection while stuck
-    ignoreLineDetection = true;
-    
-    // Set target for display
-    currentTarget = null;
-    
-    // Initialize stuck entry time if not set
-    if (stuckEntryTime === null) {
-      stuckEntryTime = t_ms;
-    }
-    
-    // If no longer stuck AND minimum time has passed, transition back to appropriate state
-    const timeInStuck = t_ms - stuckEntryTime;
-    const canExit = !stuck && !bumper_front && !bumper_left && !bumper_right && timeInStuck >= MIN_STUCK_TIME_MS;
-    if (canExit) {
-      stuckEntryTime = null; // Reset stuck entry time
-      ignoreLineDetection = false;
-      // Transition back based on ball visibility
-      if (ball.visible) {
-        currentState = STATE.ATTACKING;
-      } else {
-        currentState = STATE.SEARCHING;
-      }
-    } else {
-      // Still stuck - handle stuck behavior
-      if (stuck || bumper_front) {
-    drive(-0.5);
-    return { motor1, motor2, motor3, motor4, kick };
-  }
-  
-      if (bumper_left) {
-        turn(0.5);
-        return { motor1, motor2, motor3, motor4, kick };
-      }
-      
-      if (bumper_right) {
-        turn(-0.5);
-        return { motor1, motor2, motor3, motor4, kick };
-      }
-    }
-  }
-  
-  // Check if we just became stuck (not already in STUCK state)
-  if (currentState !== STATE.STUCK && (stuck || bumper_front || bumper_left || bumper_right)) {
-    currentState = STATE.STUCK;
-    stuckEntryTime = t_ms; // Record when we entered STUCK
-    ignoreLineDetection = true;
-    
+  // Check if we just became stuck - transition to RESET_POSITION
+  if (currentState !== STATE.RESET_POSITION && (stuck || bumper_front || bumper_left || bumper_right)) {
     // Record stuck event
     resetEvents.push({ time: t_ms, type: 'stuck' });
     // Remove events older than window
     resetEvents = resetEvents.filter(e => t_ms - e.time < RESET_EVENT_WINDOW_MS);
     
-    // Check if we should go to RESET_POSITION
-    // CRITICAL: Don't enter RESET_POSITION if ball is visible and close - prioritize attacking!
-    // Attackers should only reset when truly stuck, not when they can see the ball
-    const ballVisibleAndClose = ball.visible && ball.distance < 80; // Ball within 80cm
-    
-    // Count event types for debugging
-    const stuckCount = resetEvents.filter(e => e.type === 'stuck').length;
-    const uncrossingCount = resetEvents.filter(e => e.type === 'uncrossing').length;
-    
-    
-    if (resetEvents.length >= RESET_EVENT_THRESHOLD && !ballVisibleAndClose) {
-      currentState = STATE.RESET_POSITION;
-      ignoreLineDetection = true;
-      resetEvents = []; // Clear events
-      resetRotationAccumulated = 0;
-      resetLastHeading = null;
-      resetDistanceMoved = 0;
-      // Set target immediately to furthest goal (never ball) and initialize distance tracking
-      if (goal_blue.distance > goal_yellow.distance) {
-        resetTargetGoalIsBlue = true;
-        currentTarget = 'blue goal';
-        resetInitialDistance = goal_blue.distance; // CRITICAL: Set initial distance here
-      } else {
-        resetTargetGoalIsBlue = false;
-        currentTarget = 'yellow goal';
-        resetInitialDistance = goal_yellow.distance; // CRITICAL: Set initial distance here
-      }
-      return { motor1, motor2, motor3, motor4, kick };
-    }
-    
-    if (stuck || bumper_front) {
-      drive(-0.5);
+    // Transition to RESET_POSITION
+    currentState = STATE.RESET_POSITION;
+    ignoreLineDetection = true;
+    resetRotationAccumulated = 0;
+    resetLastHeading = null;
+    resetDistanceMoved = 0;
+    resetInitialDistance = null;
+    resetStuckCount = 0;
+    resetCurrentDirection = -1;
+    resetLastSwitchTime = 0;
     return { motor1, motor2, motor3, motor4, kick };
-  }
-  
-  if (bumper_left) {
-    turn(0.5);
-    return { motor1, motor2, motor3, motor4, kick };
-  }
-  
-  if (bumper_right) {
-    turn(-0.5);
-    return { motor1, motor2, motor3, motor4, kick };
-    }
   }
   
   // Ensure line detection is enabled for normal states (unless explicitly disabled above)
-  if (currentState !== STATE.UNCROSSING_LINE && currentState !== STATE.STUCK && currentState !== STATE.RESET_POSITION) {
+  if (currentState !== STATE.RESET_POSITION) {
     ignoreLineDetection = false;
   }
   
@@ -524,8 +641,8 @@ function strategy(worldState) {
   // ============================================================
   // Check if we should enter RESET_POSITION due to multiple line crossings
   // This check runs in all states (except RESET_POSITION itself) to catch cases where
-  // we exited UNCROSSING_LINE before accumulating 3 events
-  if (currentState !== STATE.RESET_POSITION && currentState !== STATE.UNCROSSING_LINE && currentState !== STATE.STUCK) {
+  // we accumulated multiple line crossing events
+  if (currentState !== STATE.RESET_POSITION) {
     // Remove events older than window
     resetEvents = resetEvents.filter(e => t_ms - e.time < RESET_EVENT_WINDOW_MS);
     
@@ -541,16 +658,10 @@ function strategy(worldState) {
       resetRotationAccumulated = 0;
       resetLastHeading = null;
       resetDistanceMoved = 0;
-      // Set target immediately to furthest goal (never ball) and initialize distance tracking
-      if (goal_blue.distance > goal_yellow.distance) {
-        resetTargetGoalIsBlue = true;
-        currentTarget = 'blue goal';
-        resetInitialDistance = goal_blue.distance;
-      } else {
-        resetTargetGoalIsBlue = false;
-        currentTarget = 'yellow goal';
-        resetInitialDistance = goal_yellow.distance;
-      }
+      resetInitialDistance = null;
+      resetStuckCount = 0;
+      resetCurrentDirection = -1;
+      resetLastSwitchTime = 0;
       return { motor1, motor2, motor3, motor4, kick };
     }
   }
