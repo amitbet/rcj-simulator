@@ -90,30 +90,36 @@ body {
 
 /* Mental Maps Container */
 .mental-maps-container {
-  width: 200px;
+  width: 220px;
+  min-width: 180px;
   display: flex;
   flex-direction: column;
   background: var(--bg-secondary);
   border-right: 1px solid var(--accent-dim);
-  overflow-y: auto;
-  gap: 8px;
-  padding: 8px;
+  gap: 10px;
+  padding: 10px;
+  overflow: hidden; /* Remove scroll, let items shrink */
 }
 
 .mental-map-item {
   background: var(--bg-tertiary);
   border-radius: var(--radius-sm);
-  padding: 4px;
+  padding: 6px;
   border: 1px solid var(--accent-dim);
+  width: 100%;
+  flex: 1 1 0; /* Grow and shrink equally, base size 0 */
+  min-height: 0; /* Allow flex items to shrink below content size */
+  display: flex;
+  flex-direction: column;
 }
 
 .mental-map-header {
-  font-size: 0.7rem;
+  font-size: 0.75rem;
   font-weight: 600;
   color: var(--accent);
   text-align: center;
-  margin-bottom: 4px;
-  padding: 2px;
+  margin-bottom: 6px;
+  padding: 3px;
   border-bottom: 1px solid var(--accent-dim);
 }
 

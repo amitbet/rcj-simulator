@@ -11,6 +11,7 @@ interface MentalMapViewProps {
 }
 
 export const MentalMapView: React.FC<MentalMapViewProps> = ({ worldState, robotHeading }) => {
+
   if (!worldState) {
     return null;
   }
@@ -21,17 +22,25 @@ export const MentalMapView: React.FC<MentalMapViewProps> = ({ worldState, robotH
   }
 
   const map = worldState.mentalMap;
-  const scale = 0.5; // Scale factor to fit in small display (cm to pixels)
-  const displayWidth = 120; // pixels
-  const displayHeight = 160; // pixels
   
-  // Field dimensions scaled
+  // Use fixed viewBox dimensions for consistent scaling
+  // These are the "logical" dimensions - SVG will scale to fit container
+  const viewBoxWidth = 180;
+  const viewBoxHeight = 240;
+  
+  // Calculate scale based on viewBox dimensions
+  const fieldWidthCm = map.fieldBounds.width; // 158 cm
+  const padding = 20; // pixels for padding around field in viewBox
+  const availableWidth = viewBoxWidth - padding;
+  const scale = availableWidth / fieldWidthCm; // Scale factor (cm to pixels in viewBox)
+  
+  // Field dimensions scaled (in viewBox coordinates)
   const fieldWidth = map.fieldBounds.width * scale;
   const fieldHeight = map.fieldBounds.height * scale;
   
-  // Center the field in the display
-  const offsetX = (displayWidth - fieldWidth) / 2;
-  const offsetY = (displayHeight - fieldHeight) / 2;
+  // Center the field in the viewBox
+  const offsetX = (viewBoxWidth - fieldWidth) / 2;
+  const offsetY = (viewBoxHeight - fieldHeight) / 2;
   
   // Convert robot-relative positions to display coordinates
   const normalizeAngle = (angle: number) => {
@@ -106,28 +115,43 @@ export const MentalMapView: React.FC<MentalMapViewProps> = ({ worldState, robotH
   const headingRad = (normalizedHeading * Math.PI) / 180;
 
   return (
-    <div style={{
-      width: `${displayWidth}px`,
-      height: `${displayHeight}px`,
-      backgroundColor: 'rgba(0, 0, 0, 0.8)',
-      border: '2px solid rgba(0, 212, 255, 0.6)',
-      borderRadius: '4px',
-      padding: '4px',
-      fontSize: '8px',
-      pointerEvents: 'none',
-      boxShadow: '0 2px 8px rgba(0, 0, 0, 0.5)',
-      margin: '0 auto'
-    }}>
+    <div 
+      style={{
+        width: '100%',
+        flex: '1',
+        minHeight: 0,
+        backgroundColor: 'rgba(0, 0, 0, 0.8)',
+        border: '2px solid rgba(0, 212, 255, 0.6)',
+        borderRadius: '6px',
+        padding: '6px',
+        fontSize: '9px',
+        pointerEvents: 'none',
+        boxShadow: '0 2px 8px rgba(0, 0, 0, 0.5)',
+        display: 'flex',
+        flexDirection: 'column',
+        overflow: 'hidden'
+      }}
+    >
       <div style={{ 
         color: 'rgba(255, 255, 255, 0.6)', 
-        fontSize: '7px', 
-        marginBottom: '2px',
+        fontSize: '9px', 
+        marginBottom: '4px',
         textAlign: 'center',
         fontWeight: 'bold'
       }}>
         MENTAL MAP
       </div>
-      <svg width={displayWidth} height={displayHeight} style={{ display: 'block' }}>
+      <svg 
+        style={{ 
+          display: 'block',
+          width: '100%',
+          height: '100%',
+          flex: '1',
+          minHeight: 0
+        }}
+        viewBox={`0 0 ${viewBoxWidth} ${viewBoxHeight}`}
+        preserveAspectRatio="xMidYMid meet"
+      >
         {/* Field outline */}
         <rect
           x={offsetX}
@@ -136,7 +160,7 @@ export const MentalMapView: React.FC<MentalMapViewProps> = ({ worldState, robotH
           height={fieldHeight}
           fill="rgba(34, 139, 34, 0.2)"
           stroke="rgba(255, 255, 255, 0.4)"
-          strokeWidth="1"
+          strokeWidth="1.5"
         />
         
         {/* Field center line */}
@@ -146,7 +170,7 @@ export const MentalMapView: React.FC<MentalMapViewProps> = ({ worldState, robotH
           x2={offsetX + fieldWidth / 2}
           y2={offsetY + fieldHeight}
           stroke="rgba(255, 255, 255, 0.3)"
-          strokeWidth="0.5"
+          strokeWidth="1"
         />
         
         {/* Blue goal */}
@@ -155,15 +179,15 @@ export const MentalMapView: React.FC<MentalMapViewProps> = ({ worldState, robotH
             <circle
               cx={blueGoalPos.x}
               cy={blueGoalPos.y}
-              r={3.5}
+              r={5}
               fill={`rgba(0, 100, 255, ${0.5 + blueGoalPos.confidence * 0.5})`}
               stroke="rgba(0, 200, 255, 1)"
-              strokeWidth={blueGoalPos.confidence > 0.8 ? "1.5" : "1"}
+              strokeWidth={blueGoalPos.confidence > 0.8 ? "2" : "1.5"}
             />
             <text
               x={blueGoalPos.x}
-              y={blueGoalPos.y - 7}
-              fontSize="6"
+              y={blueGoalPos.y - 9}
+              fontSize="8"
               fill="rgba(0, 200, 255, 1)"
               textAnchor="middle"
               fontWeight="bold"
@@ -179,15 +203,15 @@ export const MentalMapView: React.FC<MentalMapViewProps> = ({ worldState, robotH
             <circle
               cx={yellowGoalPos.x}
               cy={yellowGoalPos.y}
-              r={3.5}
+              r={5}
               fill={`rgba(255, 255, 0, ${0.5 + yellowGoalPos.confidence * 0.5})`}
               stroke="rgba(255, 220, 0, 1)"
-              strokeWidth={yellowGoalPos.confidence > 0.8 ? "1.5" : "1"}
+              strokeWidth={yellowGoalPos.confidence > 0.8 ? "2" : "1.5"}
             />
             <text
               x={yellowGoalPos.x}
-              y={yellowGoalPos.y - 7}
-              fontSize="6"
+              y={yellowGoalPos.y - 9}
+              fontSize="8"
               fill="rgba(255, 220, 0, 1)"
               textAnchor="middle"
               fontWeight="bold"
@@ -203,15 +227,15 @@ export const MentalMapView: React.FC<MentalMapViewProps> = ({ worldState, robotH
             <circle
               cx={centerDisplayX}
               cy={centerDisplayY}
-              r={1.5}
+              r={2}
               fill="rgba(255, 255, 255, 0.8)"
               stroke="rgba(200, 200, 200, 0.9)"
-              strokeWidth="0.5"
+              strokeWidth="0.8"
             />
             <text
               x={centerDisplayX}
-              y={centerDisplayY - 4}
-              fontSize="5"
+              y={centerDisplayY - 5}
+              fontSize="6"
               fill="rgba(255, 255, 255, 0.8)"
               textAnchor="middle"
             >
@@ -225,15 +249,15 @@ export const MentalMapView: React.FC<MentalMapViewProps> = ({ worldState, robotH
           <circle
             cx={robotDisplayX}
             cy={robotDisplayY}
-            r={5}
+            r={7}
             fill="rgba(255, 100, 100, 0.7)"
             stroke="rgba(255, 150, 150, 1)"
-            strokeWidth="1.5"
+            strokeWidth="2"
           />
           <text
             x={robotDisplayX}
-            y={robotDisplayY + 2}
-            fontSize="6"
+            y={robotDisplayY + 3}
+            fontSize="8"
             fill="rgba(255, 200, 200, 1)"
             textAnchor="middle"
             fontWeight="bold"
@@ -246,10 +270,10 @@ export const MentalMapView: React.FC<MentalMapViewProps> = ({ worldState, robotH
         <line
           x1={robotDisplayX}
           y1={robotDisplayY}
-          x2={robotDisplayX + Math.sin(headingRad) * 6}
-          y2={robotDisplayY - Math.cos(headingRad) * 6}
+          x2={robotDisplayX + Math.sin(headingRad) * 10}
+          y2={robotDisplayY - Math.cos(headingRad) * 10}
           stroke="rgba(255, 200, 200, 0.9)"
-          strokeWidth="1.5"
+          strokeWidth="2"
           markerEnd="url(#arrowhead)"
         />
         
@@ -273,12 +297,12 @@ export const MentalMapView: React.FC<MentalMapViewProps> = ({ worldState, robotH
       
       {/* Legend */}
       <div style={{ 
-        marginTop: '2px', 
-        fontSize: '6px', 
+        marginTop: '4px', 
+        fontSize: '7px', 
         color: 'rgba(255, 255, 255, 0.5)',
         display: 'flex',
         flexDirection: 'column',
-        gap: '1px'
+        gap: '2px'
       }}>
         <div style={{ display: 'flex', justifyContent: 'space-between' }}>
           <span>B: {map.blueGoal.distance !== null ? Math.round(map.blueGoal.distance) + 'cm' : '?'}</span>
@@ -286,11 +310,11 @@ export const MentalMapView: React.FC<MentalMapViewProps> = ({ worldState, robotH
         </div>
         {(map.blueGoal.worldX !== null && map.blueGoal.worldY !== null) || 
          (map.yellowGoal.worldX !== null && map.yellowGoal.worldY !== null) ? (
-          <div style={{ fontSize: '5px', color: 'rgba(0, 255, 0, 0.6)' }}>
+          <div style={{ fontSize: '6px', color: 'rgba(0, 255, 0, 0.6)' }}>
             Goals learned
           </div>
         ) : (
-          <div style={{ fontSize: '5px', color: 'rgba(255, 100, 100, 0.6)' }}>
+          <div style={{ fontSize: '6px', color: 'rgba(255, 100, 100, 0.6)' }}>
             Learning goals...
           </div>
         )}
