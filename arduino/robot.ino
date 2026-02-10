@@ -1,4 +1,15 @@
 #include <Arduino.h>
+#include <Wire.h>
+#include <SPI.h>
+#include <Adafruit_Sensor.h>
+#include <Adafruit_BNO055.h>
+#include <utility/imumaths.h>
+#if __has_include(<Pixy2.h>)
+#include <Pixy2.h>
+#define HAVE_PIXY2 1
+#else
+#define HAVE_PIXY2 0
+#endif
 
 // ---------------------- Pin Definitions ----------------------
 // 3=bin2
@@ -45,6 +56,46 @@ const int IN1_M2 = 20;
 const int IN2_M2 = 15;
 const int EN_M2 = 17;
 
+// Keep existing drive code names
+const int FL_PWM = PWM_M1;
+const int FL_INA = IN1_M1;
+const int FL_INB = IN2_M1;
+const int FL_EN = EN_M1;
+
+const int BL_PWM = PWM_M3;
+const int BL_INA = IN1_M3;
+const int BL_INB = IN2_M3;
+const int BL_EN = EN_M3;
+
+const int FR_PWM = PWM_M4;
+const int FR_INA = IN1_M4;
+const int FR_INB = IN2_M4;
+const int FR_EN = EN_M4;
+
+const int BR_PWM = PWM_M2;
+const int BR_INA = IN1_M2;
+const int BR_INB = IN2_M2;
+const int BR_EN = EN_M2;
+
+// BNO055 on I2C (requested wiring: SDA=24, SCL=25)
+const int I2C_SDA_PIN = 24;
+const int I2C_SCL_PIN = 25;
+Adafruit_BNO055 bno = Adafruit_BNO055(55, 0x28, &Wire);
+
+unsigned long lastImuPrintMs = 0;
+const unsigned long IMU_PRINT_PERIOD_MS = 100;
+unsigned long lastPixyPrintMs = 0;
+const unsigned long PIXY_PRINT_PERIOD_MS = 100;
+
+// Pixy2 SPI pins (Teensy 4.1)
+const int PIXY_MISO_PIN = 34;
+const int PIXY_MOSI_PIN = 35;
+const int PIXY_SCK_PIN = 36;
+const int PIXY_CS_PIN = 37;
+
+#if HAVE_PIXY2
+Pixy2 pixy;
+#endif
 
 // ===== Speeds =====
 const int DRIVE_SPEED = 180;   // for straight/strafe
@@ -105,8 +156,8 @@ void moveBack(int s) {
 void moveRight(int s) {
   motorForward(FL_PWM, FL_INA, FL_INB, FL_EN, s);
   motorForward(FR_PWM, FR_INA, FR_INB, FR_EN, s);
-  motorbackward(BL_PWM, BL_INA, BL_INB, BL_EN, s);
-  motorbackward(BR_PWM, BR_INA, BR_INB, BR_EN, s);
+  motorBackward(BL_PWM, BL_INA, BL_INB, BL_EN, s);
+  motorBackward(BR_PWM, BR_INA, BR_INB, BR_EN, s);
 }
 
 // Left: all -
@@ -133,6 +184,99 @@ void rotateCCW(int s) {
   motorForward (BR_PWM, BR_INA, BR_INB, BR_EN, s);
 }
 
+void printImuData() {
+  const unsigned long now = millis();
+  if (now - lastImuPrintMs < IMU_PRINT_PERIOD_MS) {
+    return;
+  }
+  lastImuPrintMs = now;
+
+  imu::Vector<3> euler = bno.getVector(Adafruit_BNO055::VECTOR_EULER);
+  imu::Vector<3> gyro = bno.getVector(Adafruit_BNO055::VECTOR_GYROSCOPE);
+  imu::Vector<3> accel = bno.getVector(Adafruit_BNO055::VECTOR_LINEARACCEL);
+
+  uint8_t sys = 0;
+  uint8_t gyroCal = 0;
+  uint8_t accelCal = 0;
+  uint8_t magCal = 0;
+  bno.getCalibration(&sys, &gyroCal, &accelCal, &magCal);
+
+  // heading=Euler.x, roll=Euler.z, pitch=Euler.y (BNO055 convention)
+  Serial.print("BNO055 heading=");
+  Serial.print(euler.x(), 1);
+  Serial.print(" roll=");
+  Serial.print(euler.z(), 1);
+  Serial.print(" pitch=");
+  Serial.print(euler.y(), 1);
+  Serial.print(" gyro_dps=(");
+  Serial.print(gyro.x(), 2);
+  Serial.print(",");
+  Serial.print(gyro.y(), 2);
+  Serial.print(",");
+  Serial.print(gyro.z(), 2);
+  Serial.print(") linacc_ms2=(");
+  Serial.print(accel.x(), 2);
+  Serial.print(",");
+  Serial.print(accel.y(), 2);
+  Serial.print(",");
+  Serial.print(accel.z(), 2);
+  Serial.print(") cal=");
+  Serial.print(sys);
+  Serial.print("/");
+  Serial.print(gyroCal);
+  Serial.print("/");
+  Serial.print(accelCal);
+  Serial.print("/");
+  Serial.println(magCal);
+}
+
+void printPixyData() {
+  const unsigned long now = millis();
+  if (now - lastPixyPrintMs < PIXY_PRINT_PERIOD_MS) {
+    return;
+  }
+  lastPixyPrintMs = now;
+
+#if HAVE_PIXY2
+  int8_t blocksStatus = pixy.ccc.getBlocks();
+  if (blocksStatus < 0) {
+    Serial.print("Pixy2 read error=");
+    Serial.println(blocksStatus);
+    return;
+  }
+
+  if (pixy.ccc.numBlocks == 0) {
+    Serial.println("Pixy2 blocks=0");
+    return;
+  }
+
+  const Block &b = pixy.ccc.blocks[0];
+  Serial.print("Pixy2 blocks=");
+  Serial.print(pixy.ccc.numBlocks);
+  Serial.print(" sig=");
+  Serial.print(b.m_signature);
+  Serial.print(" x=");
+  Serial.print(b.m_x);
+  Serial.print(" y=");
+  Serial.print(b.m_y);
+  Serial.print(" w=");
+  Serial.print(b.m_width);
+  Serial.print(" h=");
+  Serial.println(b.m_height);
+#else
+  Serial.println("Pixy2 library not installed.");
+#endif
+}
+
+void delayWithImu(unsigned long waitMs) {
+  const unsigned long start = millis();
+  while (millis() - start < waitMs) {
+    printImuData();
+    printPixyData();
+    delay(10);
+  }
+}
+
 // ===== Setup =====
 void setup() {
   pinMode(FL_PWM, OUTPUT); pinMode(FL_INA, OUTPUT); pinMode(FL_INB, OUTPUT); pinMode(FL_EN, OUTPUT);
@@ -141,6 +285,43 @@ void setup() {
   pinMode(BR_PWM, OUTPUT); pinMode(BR_INA, OUTPUT); pinMode(BR_INB, OUTPUT); pinMode(BR_EN, OUTPUT);
 
   analogWriteResolution(8); // 0..255
+  Serial.begin(115200);
+  delay(200);
+
+#if defined(CORE_TEENSY) || defined(TEENSYDUINO)
+  Wire.setSDA(I2C_SDA_PIN);
+  Wire.setSCL(I2C_SCL_PIN);
+#endif
+  Wire.begin();
+
+  if (!bno.begin()) {
+    Serial.println("BNO055 init failed. Check wiring/address (0x28/0x29).");
+  } else {
+    bno.setExtCrystalUse(true);
+    Serial.println("BNO055 initialized on I2C.");
+  }
+
+#if defined(CORE_TEENSY) || defined(TEENSYDUINO)
+  SPI.setMISO(PIXY_MISO_PIN);
+  SPI.setMOSI(PIXY_MOSI_PIN);
+  SPI.setSCK(PIXY_SCK_PIN);
+  SPI.setCS(PIXY_CS_PIN);
+#endif
+  pinMode(PIXY_CS_PIN, OUTPUT);
+  digitalWrite(PIXY_CS_PIN, HIGH);
+  SPI.begin();
+
+#if HAVE_PIXY2
+  const int8_t pixyStatus = pixy.init();
+  if (pixyStatus < 0) {
+    Serial.print("Pixy2 init failed, status=");
+    Serial.println(pixyStatus);
+  } else {
+    Serial.println("Pixy2 initialized on SPI.");
+  }
+#else
+  Serial.println("Pixy2 disabled: install Pixy2 Arduino library.");
+#endif
 
   stopAll();
   delay(1000);
@@ -150,45 +331,45 @@ void setup() {
 void loop() {
   // Forward 5s
   moveFwd(DRIVE_SPEED);
-  delay(5000);
+  delayWithImu(5000);
   stopAll();
-  delay(500);
+  delayWithImu(500);
 
   // Back 5s
   moveBack(DRIVE_SPEED);
-  delay(5000);
+  delayWithImu(5000);
   stopAll();
-  delay(500);
+  delayWithImu(500);
 
   // Right 5s
   moveRight(DRIVE_SPEED);
-  delay(5000);
+  delayWithImu(5000);
   stopAll();
-  delay(500);
+  delayWithImu(500);
 
   // Left 5s
   moveLeft(DRIVE_SPEED);
-  delay(5000);
+  delayWithImu(5000);
   stopAll();
-  delay(500);
+  delayWithImu(500);
 
   // Rotate CW: 12 steps = ~360°
   for (int i = 0; i < 12; i++) {
     rotateCW(TURN_SPEED);
-    delay(TURN_STEP_MS);   // <<< TUNE THIS
+    delayWithImu(TURN_STEP_MS);   // <<< TUNE THIS
     stopAll();
-    delay(300);
+    delayWithImu(300);
   }
 
-  delay(1000);
+  delayWithImu(1000);
 
   // Rotate CCW: 12 steps = ~360°
   for (int i = 0; i < 12; i++) {
     rotateCCW(TURN_SPEED);
-    delay(TURN_STEP_MS);   // <<< TUNE THIS
+    delayWithImu(TURN_STEP_MS);   // <<< TUNE THIS
     stopAll();
-    delay(300);
+    delayWithImu(300);
   }
 
-  delay(3000); // repeat
+  delayWithImu(3000); // repeat
 }
