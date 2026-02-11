@@ -4,12 +4,9 @@
 #include <Adafruit_Sensor.h>
 #include <Adafruit_BNO055.h>
 #include <utility/imumaths.h>
-#if __has_include(<Pixy2.h>)
-#include <Pixy2.h>
-#define HAVE_PIXY2 1
-#else
-#define HAVE_PIXY2 0
-#endif
+ 
+#include <TPixy2.h>
+ 
 
 // ---------------------- Pin Definitions ----------------------
 // 3=bin2
@@ -87,16 +84,66 @@ const unsigned long IMU_PRINT_PERIOD_MS = 100;
 unsigned long lastPixyPrintMs = 0;
 const unsigned long PIXY_PRINT_PERIOD_MS = 100;
 
-// Pixy2 SPI pins (Teensy 4.1)
-const int PIXY_MISO_PIN = 34;
-const int PIXY_MOSI_PIN = 35;
-const int PIXY_SCK_PIN = 36;
-const int PIXY_CS_PIN = 37;
+// Pixy2 SPI1 pins (Teensy 4.1)
+const int PIXY_MISO_PIN = 1;
+const int PIXY_MOSI_PIN = 26;
+const int PIXY_SCK_PIN = 27;
+const int PIXY_CS_PIN = 0;
 
-#if HAVE_PIXY2
-Pixy2 pixy;
-#endif
+#define PIXY_SPI_CLOCKRATE 2000000
+class Link2SPI1_SS
+{
+public:
+  int8_t open(uint32_t arg)
+  {
+    if (arg == PIXY_DEFAULT_ARGVAL) {
+      ssPin = 0;
+    } else {
+      ssPin = (uint8_t)arg;
+    }
+    pinMode(ssPin, OUTPUT);
+    digitalWrite(ssPin, HIGH);
+    SPI1.begin();
+    SPI1.beginTransaction(SPISettings(PIXY_SPI_CLOCKRATE, MSBFIRST, SPI_MODE1));
+    return 0;
+  }
 
+  void close()
+  {
+    SPI1.endTransaction();
+  }
+
+  int16_t recv(uint8_t *buf, uint8_t len, uint16_t *cs = NULL)
+  {
+    uint8_t i;
+    if (cs) *cs = 0;
+    digitalWrite(ssPin, LOW);
+    for (i = 0; i < len; i++)
+    {
+      buf[i] = SPI1.transfer(0x00);
+      if (cs) *cs += buf[i];
+    }
+    digitalWrite(ssPin, HIGH);
+    return len;
+  }
+
+  int16_t send(uint8_t *buf, uint8_t len)
+  {
+    uint8_t i;
+    digitalWrite(ssPin, LOW);
+    for (i = 0; i < len; i++)
+      SPI1.transfer(buf[i]);
+    digitalWrite(ssPin, HIGH);
+    return len;
+  }
+
+private:
+  uint8_t ssPin;
+};
+
+typedef TPixy2<Link2SPI1_SS> Pixy2SPI1_SS;
+Pixy2SPI1_SS pixy;
+ 
 // ===== Speeds =====
 const int DRIVE_SPEED = 180;   // for straight/strafe
 const int TURN_SPEED  = 160;   // for rotation
@@ -237,8 +284,7 @@ void printPixyData() {
   }
   lastPixyPrintMs = now;
 
-#if HAVE_PIXY2
-  int8_t blocksStatus = pixy.ccc.getBlocks();
+   int8_t blocksStatus = pixy.ccc.getBlocks();
   if (blocksStatus < 0) {
     Serial.print("Pixy2 read error=");
     Serial.println(blocksStatus);
@@ -263,10 +309,7 @@ void printPixyData() {
   Serial.print(b.m_width);
   Serial.print(" h=");
   Serial.println(b.m_height);
-#else
-  Serial.println("Pixy2 library not installed.");
-#endif
-}
+ }
 
 void delayWithImu(unsigned long waitMs) {
   const unsigned long start = millis();
@@ -302,27 +345,23 @@ void setup() {
   }
 
 #if defined(CORE_TEENSY) || defined(TEENSYDUINO)
-  SPI.setMISO(PIXY_MISO_PIN);
-  SPI.setMOSI(PIXY_MOSI_PIN);
-  SPI.setSCK(PIXY_SCK_PIN);
-  SPI.setCS(PIXY_CS_PIN);
+  SPI1.setMISO(PIXY_MISO_PIN);
+  SPI1.setMOSI(PIXY_MOSI_PIN);
+  SPI1.setSCK(PIXY_SCK_PIN);
+  SPI1.setCS(PIXY_CS_PIN);
 #endif
   pinMode(PIXY_CS_PIN, OUTPUT);
   digitalWrite(PIXY_CS_PIN, HIGH);
-  SPI.begin();
+  SPI1.begin();
 
-#if HAVE_PIXY2
-  const int8_t pixyStatus = pixy.init();
+  const int8_t pixyStatus = pixy.init(PIXY_CS_PIN);
   if (pixyStatus < 0) {
     Serial.print("Pixy2 init failed, status=");
     Serial.println(pixyStatus);
   } else {
     Serial.println("Pixy2 initialized on SPI.");
   }
-#else
-  Serial.println("Pixy2 disabled: install Pixy2 Arduino library.");
-#endif
-
+ 
   stopAll();
   delay(1000);
 }
@@ -333,43 +372,43 @@ void loop() {
   moveFwd(DRIVE_SPEED);
   delayWithImu(5000);
   stopAll();
-  delayWithImu(500);
+  // delayWithImu(500);
 
-  // Back 5s
-  moveBack(DRIVE_SPEED);
-  delayWithImu(5000);
-  stopAll();
-  delayWithImu(500);
+  // // Back 5s
+  // moveBack(DRIVE_SPEED);
+  // delayWithImu(5000);
+  // stopAll();
+  // delayWithImu(500);
 
-  // Right 5s
-  moveRight(DRIVE_SPEED);
-  delayWithImu(5000);
-  stopAll();
-  delayWithImu(500);
+  // // Right 5s
+  // moveRight(DRIVE_SPEED);
+  // delayWithImu(5000);
+  // stopAll();
+  // delayWithImu(500);
 
-  // Left 5s
-  moveLeft(DRIVE_SPEED);
-  delayWithImu(5000);
-  stopAll();
-  delayWithImu(500);
+  // // Left 5s
+  // moveLeft(DRIVE_SPEED);
+  // delayWithImu(5000);
+  // stopAll();
+  // delayWithImu(500);
 
-  // Rotate CW: 12 steps = ~360°
-  for (int i = 0; i < 12; i++) {
-    rotateCW(TURN_SPEED);
-    delayWithImu(TURN_STEP_MS);   // <<< TUNE THIS
-    stopAll();
-    delayWithImu(300);
-  }
+  // // Rotate CW: 12 steps = ~360°
+  // for (int i = 0; i < 12; i++) {
+  //   rotateCW(TURN_SPEED);
+  //   delayWithImu(TURN_STEP_MS);   // <<< TUNE THIS
+  //   stopAll();
+  //   delayWithImu(300);
+  // }
 
-  delayWithImu(1000);
+  // delayWithImu(1000);
 
-  // Rotate CCW: 12 steps = ~360°
-  for (int i = 0; i < 12; i++) {
-    rotateCCW(TURN_SPEED);
-    delayWithImu(TURN_STEP_MS);   // <<< TUNE THIS
-    stopAll();
-    delayWithImu(300);
-  }
+  // // Rotate CCW: 12 steps = ~360°
+  // for (int i = 0; i < 12; i++) {
+  //   rotateCCW(TURN_SPEED);
+  //   delayWithImu(TURN_STEP_MS);   // <<< TUNE THIS
+  //   stopAll();
+  //   delayWithImu(300);
+  // }
 
-  delayWithImu(3000); // repeat
+  // delayWithImu(3000); // repeat
 }
