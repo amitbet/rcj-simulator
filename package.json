@@ -7,6 +7,10 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
+    "test:strategy": "node scripts/strategy-sim-tests.mjs",
+    "trace:server": "node scripts/trace-server.mjs",
+    "debug:dev": "concurrently \"npm run trace:server\" \"npm run dev\"",
+    "debug:electron": "concurrently \"npm run trace:server\" \"npm run electron:dev\"",
     "electron": "electron .",
     "electron:dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",
     "start": "vite"
@@ -34,4 +38,3 @@
   "author": "",
   "license": "MIT"
 }
-

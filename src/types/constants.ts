@@ -149,18 +149,16 @@ export const COLORS = {
 
 // Starting positions (in cm, relative to field center)
 // Blue team defends the top goal (negative Y), Yellow defends bottom (positive Y)
-// Robots face toward the ball/center at start (angle points where kicker faces)
+// Robots start aligned with field lines and facing opponent side (angle points where kicker faces)
 export const STARTING_POSITIONS = {
   blue: {
     // Blue attacks toward positive Y (yellow goal)
-    // Attacker starts near center, faces ball (at 0,0) so angle toward ball
-    attacker: { x: -30, y: -40, angle: Math.PI / 4 },  // Offset left, facing toward center
-    // Defender near own goal, facing toward ball
+    attacker: { x: -30, y: -40, angle: Math.PI / 2 },  // Straight toward opponent side
     defender: { x: 30, y: -FIELD.HEIGHT / 2 + 40, angle: Math.PI / 2 },  // Near own goal, facing center
   },
   yellow: {
     // Yellow attacks toward negative Y (blue goal)
-    attacker: { x: 30, y: 40, angle: -Math.PI * 3 / 4 },  // Offset right, facing toward center
+    attacker: { x: 30, y: 40, angle: -Math.PI / 2 },  // Straight toward opponent side
     defender: { x: -30, y: FIELD.HEIGHT / 2 - 40, angle: -Math.PI / 2 },  // Near own goal, facing center
   },
   ball: { x: 0, y: 0 },

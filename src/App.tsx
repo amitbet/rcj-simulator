@@ -39,7 +39,9 @@ const App: React.FC = () => {
   const [isDragging, setIsDragging] = useState(false);
   const [dragTarget, setDragTarget] = useState<{ type: 'ball' | 'robot'; id?: string } | null>(null);
   const [use360View, setUse360View] = useState(false);
-  const [useCameraData, setUseCameraData] = useState(true); // Default to camera data
+  const envCameraDefault = (import.meta as any).env?.VITE_USE_CAMERA_DATA;
+  const initialUseCameraData = !(envCameraDefault === '0' || envCameraDefault === 'false');
+  const [useCameraData, setUseCameraData] = useState(initialUseCameraData);
 
   // Strategies state with hashes for change detection
   const [strategies, setStrategies] = useState<Record<string, { code: string; hash: string; loadTime: number }>>({});
@@ -597,4 +599,3 @@ const App: React.FC = () => {
 };
 
 export default App;
-

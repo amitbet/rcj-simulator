@@ -93,9 +93,15 @@ export const MentalMapView: React.FC<MentalMapViewProps> = ({ worldState, robotH
   };
   
   // Try world positions first, fallback to relative
-  const blueGoalPos = getGoalDisplayPosFromWorld(map.blueGoal) || getGoalDisplayPosFromRelative(map.blueGoal);
-  const yellowGoalPos = getGoalDisplayPosFromWorld(map.yellowGoal) || getGoalDisplayPosFromRelative(map.yellowGoal);
-  
+  const blueGoalPos = getGoalDisplayPosFromWorld(map.blueGoal as any) || getGoalDisplayPosFromRelative(map.blueGoal);
+  const yellowGoalPos = getGoalDisplayPosFromWorld(map.yellowGoal as any) || getGoalDisplayPosFromRelative(map.yellowGoal);
+
+  // Ball position (same logic: world first, fallback to relative)
+  const ballData = (map as any).ball;
+  const ballPos = ballData
+    ? (getGoalDisplayPosFromWorld(ballData) || getGoalDisplayPosFromRelative(ballData))
+    : null;
+
   // Robot position in world coordinates (if available)
   const robotWorldX = map.lastPosition.x;
   const robotWorldY = map.lastPosition.y;
@@ -221,6 +227,30 @@ export const MentalMapView: React.FC<MentalMapViewProps> = ({ worldState, robotH
           </g>
         )}
         
+        {/* Ball */}
+        {ballPos && (
+          <g>
+            <circle
+              cx={ballPos.x}
+              cy={ballPos.y}
+              r={4}
+              fill={`rgba(255, 140, 0, ${0.4 + ballPos.confidence * 0.6})`}
+              stroke="rgba(255, 100, 0, 1)"
+              strokeWidth={ballPos.confidence > 0.5 ? "1.5" : "1"}
+            />
+            <text
+              x={ballPos.x}
+              y={ballPos.y - 7}
+              fontSize="7"
+              fill="rgba(255, 160, 0, 1)"
+              textAnchor="middle"
+              fontWeight="bold"
+            >
+              BALL
+            </text>
+          </g>
+        )}
+
         {/* Field center (midpoint marker) - only show if both goals are visible */}
         {(blueGoalPos && yellowGoalPos) && (
           <g>
@@ -306,12 +336,15 @@ export const MentalMapView: React.FC<MentalMapViewProps> = ({ worldState, robotH
       }}>
         <div style={{ display: 'flex', justifyContent: 'space-between' }}>
           <span>B: {map.blueGoal.distance !== null ? Math.round(map.blueGoal.distance) + 'cm' : '?'}</span>
+          <span style={{ color: 'rgba(255, 160, 0, 0.8)' }}>
+            Ball: {ballData?.distance != null ? Math.round(ballData.distance) + 'cm' : '?'}
+          </span>
           <span>Y: {map.yellowGoal.distance !== null ? Math.round(map.yellowGoal.distance) + 'cm' : '?'}</span>
         </div>
-        {(map.blueGoal.worldX !== null && map.blueGoal.worldY !== null) || 
-         (map.yellowGoal.worldX !== null && map.yellowGoal.worldY !== null) ? (
+        {((map.blueGoal as any).worldX != null && (map.blueGoal as any).worldY != null) ||
+         ((map.yellowGoal as any).worldX != null && (map.yellowGoal as any).worldY != null) ? (
           <div style={{ fontSize: '6px', color: 'rgba(0, 255, 0, 0.6)' }}>
-            Goals learned
+            Localized
           </div>
         ) : (
           <div style={{ fontSize: '6px', color: 'rgba(255, 100, 100, 0.6)' }}>

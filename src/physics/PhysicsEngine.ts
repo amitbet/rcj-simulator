@@ -348,61 +348,30 @@ export class PhysicsEngine {
     const pos = body.position;
 
     const { motor1, motor2, motor3, motor4 } = action;
-    
-    // Check if this is a strafing pattern (diagonal motors: fl=br, fr=bl, opposite signs)
-    // Strafing pattern: motor1 = speed, motor2 = -speed, motor3 = speed, motor4 = -speed
-    const isStrafing = Math.abs(motor1 - motor3) < 0.1 && Math.abs(motor2 - motor4) < 0.1 && 
-                       Math.abs(motor1 + motor2) < 0.1 && Math.abs(motor3 + motor4) < 0.1;
-    
-    let forward = 0;
-    let rotation = 0;
-    let strafe = 0; // Sideways movement (perpendicular to forward)
-    
-    if (isStrafing) {
-      // Strafing mode: diagonal motor pattern for sideways movement
-      // Front-left and back-right average = strafe direction
-      // Front-right and back-left average = opposite strafe direction
-      const diagonal1 = (motor1 + motor3) / 2; // Front-left + back-right
-      const diagonal2 = (motor2 + motor4) / 2; // Front-right + back-left
-      strafe = (diagonal1 - diagonal2) / 2; // Net strafe speed
-      
-      console.log(`[Physics] Strafing detected: motor1=${motor1.toFixed(2)}, motor2=${motor2.toFixed(2)}, motor3=${motor3.toFixed(2)}, motor4=${motor4.toFixed(2)}, strafe=${strafe.toFixed(2)}`);
-    } else {
-      // Normal differential drive mode
-      // Left side motors (1=front-left, 4=back-left)
-      const leftSide = (motor1 + motor4) / 2;
-      // Right side motors (2=front-right, 3=back-right)
-      const rightSide = (motor2 + motor3) / 2;
-      
-      // Forward = average of both sides
-      forward = (leftSide + rightSide) / 2;
-      
-      // Rotation = difference between sides (right - left = turn right/clockwise)
-      rotation = (rightSide - leftSide) / 2;
-    }
+
+    // Decompose omni-directional motor values back into forward, strafe, and turn.
+    // Based on omniMix encoding: m1=f+s-t, m2=f-s+t, m3=f+s+t, m4=f-s-t
+    const forward  = (motor1 + motor2 + motor3 + motor4) / 4;
+    const strafe   = (motor1 - motor2 + motor3 - motor4) / 4;
+    const rotation = (-motor1 + motor2 + motor3 - motor4) / 4;
 
     // Calculate movement for this frame
     const dt = 0.016; // ~60 FPS timestep
     const maxSpeed = ROBOT.MAX_SPEED * dt; // cm per frame
     const maxAngular = (ROBOT.MAX_ANGULAR_SPEED * Math.PI / 180) * dt; // rad per frame
 
-    // Calculate new position
     // Forward/backward movement
     const moveX = forward * Math.cos(angle) * maxSpeed;
     const moveY = forward * Math.sin(angle) * maxSpeed;
-    
+
     // Strafing movement (perpendicular to forward, 90 degrees rotated)
-    let finalMoveX = moveX;
-    let finalMoveY = moveY;
-    if (isStrafing && Math.abs(strafe) > 0.01) {
-      const strafeAngle = angle + Math.PI / 2; // Perpendicular to forward
-      const strafeX = strafe * Math.cos(strafeAngle) * maxSpeed;
-      const strafeY = strafe * Math.sin(strafeAngle) * maxSpeed;
-      // Add strafe to movement
-      finalMoveX = moveX + strafeX;
-      finalMoveY = moveY + strafeY;
-    }
-    
+    const strafeAngle = angle + Math.PI / 2;
+    const strafeX = strafe * Math.cos(strafeAngle) * maxSpeed;
+    const strafeY = strafe * Math.sin(strafeAngle) * maxSpeed;
+
+    const finalMoveX = moveX + strafeX;
+    const finalMoveY = moveY + strafeY;
+
     const newAngle = angle + rotation * maxAngular;
 
     // Move robot kinematically (position-based)

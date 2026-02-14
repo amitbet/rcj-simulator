@@ -69,6 +69,12 @@ export class SimulationEngine {
 
   // Toggle for using camera vs physics data for strategies
   private useCameraData: boolean = true; // Default to camera data
+  private cameraStrictMode: boolean = false; // If true, undetected camera objects become invisible
+  private strategyTraceEnabled: boolean = false;
+  private strategyTraceUrl: string = '';
+  private strategyTraceBuffer: any[] = [];
+  private lastStrategyTraceFlushMs: number = 0;
+  private strategyTraceErrorLogged: boolean = false;
 
   // Callbacks
   private onStateUpdate: ((state: SimulationState) => void) | null = null;
@@ -97,6 +103,11 @@ export class SimulationEngine {
 
     this.setupPhysicsCallbacks();
     this.setupRefereeCallbacks();
+
+    const env = (import.meta as any).env || {};
+    this.strategyTraceEnabled = env.VITE_STRATEGY_TRACE === '1' || env.VITE_STRATEGY_TRACE === 'true';
+    this.strategyTraceUrl = env.VITE_TRACE_URL || 'http://127.0.0.1:8787/trace';
+    this.cameraStrictMode = env.VITE_CAMERA_STRICT === '1' || env.VITE_CAMERA_STRICT === 'true';
   }
 
   // Initialize the simulation
@@ -433,6 +444,15 @@ export class SimulationEngine {
       );
 
       // Log physics observations before override
+      const physicsBall = { ...worldState.ball };
+      const physicsBlueGoal = { ...worldState.goal_blue };
+      const physicsYellowGoal = { ...worldState.goal_yellow };
+      const visionSource = {
+        ball: 'physics',
+        goal_blue: 'physics',
+        goal_yellow: 'physics',
+      };
+
       if (id === robots.keys().next().value) { // Log for first robot only to avoid spam
         console.log(`[SimEngine] Robot ${id}: useCameraData=${this.useCameraData}`);
         console.log(`[SimEngine] Physics ball: visible=${worldState.ball.visible}, distance=${worldState.ball.distance.toFixed(1)}, angle=${worldState.ball.angle_deg.toFixed(1)}`);
@@ -458,9 +478,16 @@ export class SimulationEngine {
             worldState.ball.visible = true;
             worldState.ball.distance = cameraObs.ball.distance;
             worldState.ball.angle_deg = cameraObs.ball.angle_deg;
+            visionSource.ball = 'camera';
           } else {
-            // Camera ran but didn't detect ball - set as not visible
-            worldState.ball.visible = false;
+            // Camera missed ball: fallback to physics unless strict camera mode is enabled.
+            if (this.cameraStrictMode) {
+              worldState.ball.visible = false;
+              visionSource.ball = 'none';
+            } else {
+              worldState.ball = physicsBall;
+              visionSource.ball = 'physics_fallback';
+            }
           }
           
           // Blue goal: visible only if camera detected it
@@ -468,9 +495,15 @@ export class SimulationEngine {
             worldState.goal_blue.visible = true;
             worldState.goal_blue.distance = cameraObs.goal_blue.distance;
             worldState.goal_blue.angle_deg = cameraObs.goal_blue.angle_deg;
+            visionSource.goal_blue = 'camera';
           } else {
-            // Camera ran but didn't detect blue goal - set as not visible
-            worldState.goal_blue.visible = false;
+            if (this.cameraStrictMode) {
+              worldState.goal_blue.visible = false;
+              visionSource.goal_blue = 'none';
+            } else {
+              worldState.goal_blue = physicsBlueGoal;
+              visionSource.goal_blue = 'physics_fallback';
+            }
           }
           
           // Yellow goal: visible only if camera detected it
@@ -478,16 +511,34 @@ export class SimulationEngine {
             worldState.goal_yellow.visible = true;
             worldState.goal_yellow.distance = cameraObs.goal_yellow.distance;
             worldState.goal_yellow.angle_deg = cameraObs.goal_yellow.angle_deg;
+            visionSource.goal_yellow = 'camera';
           } else {
-            // Camera ran but didn't detect yellow goal - set as not visible
-            worldState.goal_yellow.visible = false;
+            if (this.cameraStrictMode) {
+              worldState.goal_yellow.visible = false;
+              visionSource.goal_yellow = 'none';
+            } else {
+              worldState.goal_yellow = physicsYellowGoal;
+              visionSource.goal_yellow = 'physics_fallback';
+            }
           }
         } else {
-          // Camera hasn't run yet for this robot - mark all vision objects as not visible
-          // This ensures strategies only use camera data, never physics data for vision
-          worldState.ball.visible = false;
-          worldState.goal_blue.visible = false;
-          worldState.goal_yellow.visible = false;
+          if (this.cameraStrictMode) {
+            // Camera hasn't run yet for this robot.
+            worldState.ball.visible = false;
+            worldState.goal_blue.visible = false;
+            worldState.goal_yellow.visible = false;
+            visionSource.ball = 'none';
+            visionSource.goal_blue = 'none';
+            visionSource.goal_yellow = 'none';
+          } else {
+            // Hybrid mode: keep physics observations until camera provides data.
+            worldState.ball = physicsBall;
+            worldState.goal_blue = physicsBlueGoal;
+            worldState.goal_yellow = physicsYellowGoal;
+            visionSource.ball = 'physics_no_camera';
+            visionSource.goal_blue = 'physics_no_camera';
+            visionSource.goal_yellow = 'physics_no_camera';
+          }
         }
       } else {
         // useCameraData is false - use physics-based observations directly
@@ -497,6 +548,7 @@ export class SimulationEngine {
         }
       }
       // If useCameraData is false, use physics-based observations (worldState from ObservationSystem)
+      (worldState as any).vision_source = visionSource;
 
       // Line crossing penalties disabled - robots can move freely
       // The checkLineCrossings call is disabled to allow free movement
@@ -525,7 +577,11 @@ export class SimulationEngine {
       
       // Apply action to physics
       this.physics.applyAction(id, action);
+
+      this.recordStrategyTrace(id, worldState, action, state, target);
     }
+
+    this.flushStrategyTrace(this.gameState.time_elapsed_ms);
 
     // Step physics (use scaled delta for faster physics at higher speeds)
     this.physics.step(deltaMs);
@@ -537,6 +593,85 @@ export class SimulationEngine {
     // Check for ball unreachable/stuck situation
     // Use unscaled time so ball stuck detection isn't affected by speed multiplier
     this.checkBallUnreachable(unscaledDeltaMs, physicsState.ball);
+  }
+
+  private recordStrategyTrace(
+    robotId: string,
+    worldState: WorldState,
+    action: Action,
+    state?: string,
+    target?: string
+  ): void {
+    if (!this.strategyTraceEnabled) return;
+
+    this.strategyTraceBuffer.push({
+      t_ms: worldState.t_ms,
+      robot_id: robotId,
+      use_camera_data: this.useCameraData,
+      state: state ?? null,
+      target: target ?? null,
+      heading_deg: worldState.heading_deg,
+      v_est: worldState.v_est,
+      stuck: worldState.stuck,
+      stuck_confidence: worldState.stuck_confidence,
+      bumpers: {
+        front: worldState.bumper_front,
+        left: worldState.bumper_left,
+        right: worldState.bumper_right,
+      },
+      lines: {
+        front: worldState.line_front,
+        left: worldState.line_left,
+        right: worldState.line_right,
+        rear: worldState.line_rear,
+      },
+      ball: {
+        visible: worldState.ball.visible,
+        distance: worldState.ball.distance,
+        angle_deg: worldState.ball.angle_deg,
+      },
+      goal_blue: {
+        visible: worldState.goal_blue.visible,
+        distance: worldState.goal_blue.distance,
+        angle_deg: worldState.goal_blue.angle_deg,
+      },
+      goal_yellow: {
+        visible: worldState.goal_yellow.visible,
+        distance: worldState.goal_yellow.distance,
+        angle_deg: worldState.goal_yellow.angle_deg,
+      },
+      vision_source: (worldState as any).vision_source ?? null,
+      action: {
+        motor1: action.motor1,
+        motor2: action.motor2,
+        motor3: action.motor3,
+        motor4: action.motor4,
+        kick: action.kick,
+      },
+    });
+  }
+
+  private flushStrategyTrace(nowMs: number): void {
+    if (!this.strategyTraceEnabled) return;
+    if (this.strategyTraceBuffer.length === 0) return;
+
+    const shouldFlushBySize = this.strategyTraceBuffer.length >= 100;
+    const shouldFlushByTime = nowMs - this.lastStrategyTraceFlushMs >= 250;
+    if (!shouldFlushBySize && !shouldFlushByTime) return;
+
+    const batch = this.strategyTraceBuffer.splice(0, this.strategyTraceBuffer.length);
+    this.lastStrategyTraceFlushMs = nowMs;
+
+    fetch(this.strategyTraceUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ events: batch }),
+    }).catch((err) => {
+      if (!this.strategyTraceErrorLogged) {
+        this.strategyTraceErrorLogged = true;
+        console.warn('[StrategyTrace] failed to send trace batch:', err);
+      }
+    });
   }
 
   // Update during out of bounds
@@ -1053,4 +1188,3 @@ export class SimulationEngine {
     this.physics.dispose();
   }
 }
-
