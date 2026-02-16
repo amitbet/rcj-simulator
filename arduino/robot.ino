@@ -42,15 +42,15 @@ const int EN_M3 = 9;
 // 13= pwma
 
 // Front Right (M4)  [A]
-const int PWM_M4 = 13;
+const int PWM_M4 = 13;   
 const int IN1_M4 =18;
-const int IN2_M4 = 19;
+const int IN2_M4 = 15;
 const int EN_M4 = 16;
 
 // Back Right (M2)   [B]
 const int PWM_M2 = 14;
 const int IN1_M2 = 20;
-const int IN2_M2 = 15;
+const int IN2_M2 = 19;
 const int EN_M2 = 17;
 
 // Keep existing drive code names
@@ -59,20 +59,21 @@ const int FL_INA = IN1_M1;
 const int FL_INB = IN2_M1;
 const int FL_EN = EN_M1;
 
-const int BL_PWM = PWM_M3;
-const int BL_INA = IN1_M3;
-const int BL_INB = IN2_M3;
-const int BL_EN = EN_M3;
+const int BL_PWM = PWM_M4;
+const int BL_INA = IN1_M4;
+const int BL_INB = IN2_M4;
+const int BL_EN = EN_M4;
 
-const int FR_PWM = PWM_M4;
-const int FR_INA = IN1_M4;
-const int FR_INB = IN2_M4;
-const int FR_EN = EN_M4;
+const int FR_PWM = PWM_M3;
+const int FR_INA = IN1_M3;
+const int FR_INB = IN2_M3;
+const int FR_EN = EN_M3;
 
 const int BR_PWM = PWM_M2;
 const int BR_INA = IN1_M2;
 const int BR_INB = IN2_M2;
 const int BR_EN = EN_M2;
+
 
 // BNO055 on I2C (requested wiring: SDA=24, SCL=25)
 const int I2C_SDA_PIN = 24;
@@ -147,6 +148,15 @@ Pixy2SPI1_SS pixy;
 // ===== Speeds =====
 const int DRIVE_SPEED = 180;   // for straight/strafe
 const int TURN_SPEED  = 160;   // for rotation
+const int SEARCH_TURN_SPEED = 120;
+
+// ===== Pixy2 orange ball tracking =====
+// Set this to the Pixy2 signature trained for the orange ball in PixyMon.
+const uint8_t ORANGE_BALL_SIGNATURE = 3;
+const int PIXY_FRAME_CENTER_X = 158;  // Pixy2 frame width is 316 px
+const int PIXY_CENTER_DEADBAND = 18;  // px from center considered "aligned"
+const int BALL_TARGET_AREA = 4200;    // tune based on desired stop distance
+const int BALL_AREA_TOLERANCE = 700;
 
 // ===== Rotation timing =====
 // This is the IMPORTANT tuning value!
@@ -320,6 +330,30 @@ void delayWithImu(unsigned long waitMs) {
   }
 }
 
+bool getBestOrangeBall(Block &bestBlock) {
+  const int8_t blocksStatus = pixy.ccc.getBlocks();
+  if (blocksStatus < 0 || pixy.ccc.numBlocks == 0) {
+    return false;
+  }
+
+  bool found = false;
+  int bestArea = 0;
+  for (uint16_t i = 0; i < pixy.ccc.numBlocks; i++) {
+    const Block &b = pixy.ccc.blocks[i];
+    if (b.m_signature != ORANGE_BALL_SIGNATURE) {
+      continue;
+    }
+
+    const int area = (int)b.m_width * (int)b.m_height;
+    if (!found || area > bestArea) {
+      bestArea = area;
+      bestBlock = b;
+      found = true;
+    }
+  }
+  return found;
+}
+
 // ===== Setup =====
 void setup() {
   pinMode(FL_PWM, OUTPUT); pinMode(FL_INA, OUTPUT); pinMode(FL_INB, OUTPUT); pinMode(FL_EN, OUTPUT);
@@ -366,49 +400,87 @@ void setup() {
   delay(1000);
 }
 
-// ===== Main demo =====
-void loop() {
+void demo() {
   // Forward 5s
   moveFwd(DRIVE_SPEED);
   delayWithImu(5000);
   stopAll();
-  // delayWithImu(500);
+  delayWithImu(500);
 
-  // // Back 5s
-  // moveBack(DRIVE_SPEED);
-  // delayWithImu(5000);
-  // stopAll();
-  // delayWithImu(500);
+  // Back 5s
+  moveBack(DRIVE_SPEED);
+  delayWithImu(5000);
+  stopAll();
+  delayWithImu(500);
 
-  // // Right 5s
-  // moveRight(DRIVE_SPEED);
-  // delayWithImu(5000);
-  // stopAll();
-  // delayWithImu(500);
+  // Right 5s
+  moveRight(DRIVE_SPEED);
+  delayWithImu(5000);
+  stopAll();
+  delayWithImu(500);
 
-  // // Left 5s
-  // moveLeft(DRIVE_SPEED);
-  // delayWithImu(5000);
-  // stopAll();
-  // delayWithImu(500);
+  // Left 5s
+  moveLeft(DRIVE_SPEED);
+  delayWithImu(5000);
+  stopAll();
+  delayWithImu(500);
 
-  // // Rotate CW: 12 steps = ~360°
-  // for (int i = 0; i < 12; i++) {
-  //   rotateCW(TURN_SPEED);
-  //   delayWithImu(TURN_STEP_MS);   // <<< TUNE THIS
-  //   stopAll();
-  //   delayWithImu(300);
-  // }
+  // Rotate CW: 12 steps = ~360°
+  for (int i = 0; i < 12; i++) {
+    rotateCW(TURN_SPEED);
+    delayWithImu(TURN_STEP_MS);   // <<< TUNE THIS
+    stopAll();
+    delayWithImu(300);
+  }
 
-  // delayWithImu(1000);
+  delayWithImu(1000);
 
-  // // Rotate CCW: 12 steps = ~360°
-  // for (int i = 0; i < 12; i++) {
-  //   rotateCCW(TURN_SPEED);
-  //   delayWithImu(TURN_STEP_MS);   // <<< TUNE THIS
-  //   stopAll();
-  //   delayWithImu(300);
-  // }
+  // Rotate CCW: 12 steps = ~360°
+  for (int i = 0; i < 12; i++) {
+    rotateCCW(TURN_SPEED);
+    delayWithImu(TURN_STEP_MS);   // <<< TUNE THIS
+    stopAll();
+    delayWithImu(300);
+  }
 
-  // delayWithImu(3000); // repeat
+  delayWithImu(3000); // repeat
+}
+
+// ===== Main behavior: follow orange ball with forward-facing Pixy2 =====
+void ball_follow() {
+  Block ball;
+  const bool hasBall = getBestOrangeBall(ball);
+
+  if (!hasBall) {
+    // Search by slowly rotating in place until the ball is seen.
+    rotateCW(SEARCH_TURN_SPEED);
+    printImuData();
+    printPixyData();
+    delay(20);
+    return;
+  }
+
+  const int xError = (int)ball.m_x - PIXY_FRAME_CENTER_X;
+  const int ballArea = (int)ball.m_width * (int)ball.m_height;
+
+  if (xError > PIXY_CENTER_DEADBAND) {
+    rotateCW(TURN_SPEED);
+  } else if (xError < -PIXY_CENTER_DEADBAND) {
+    rotateCCW(TURN_SPEED);
+  } else if (ballArea < (BALL_TARGET_AREA - BALL_AREA_TOLERANCE)) {
+    moveFwd(DRIVE_SPEED);
+  } else if (ballArea > (BALL_TARGET_AREA + BALL_AREA_TOLERANCE)) {
+    moveBack(DRIVE_SPEED / 2);
+  } else {
+    stopAll();
+  }
+
+  printImuData();
+  printPixyData();
+  delay(20);
+}
+
+
+void loop() {
+  demo();
 }
