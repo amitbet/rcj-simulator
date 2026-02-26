@@ -11,6 +11,8 @@ import { SimulationState, Team, RobotRole } from '../types';
 import { FIELD, GOAL, BALL, ROBOT, COLORS, CAMERA } from '../types/constants';
 import { ConicalMirrorShader } from './shaders/ConicalMirrorShader';
 
+export type RobotCameraMode = 'none' | 'conical_360' | 'front_pixy2';
+
 export class Renderer3D {
   private container: HTMLElement;
   private scene: THREE.Scene;
@@ -26,7 +28,7 @@ export class Renderer3D {
   private composer: EffectComposer | null = null;
   private conicalMirrorPass: ShaderPass | null = null;
   private followRobotId: string | null = null;
-  private use360View: boolean = false;
+  private robotCameraMode: RobotCameraMode = 'none';
   private cubeCamera: THREE.CubeCamera | null = null;
   private cubeRenderTarget: THREE.WebGLCubeRenderTarget | null = null;
   private cubeScene: THREE.Scene | null = null;
@@ -129,40 +131,48 @@ export class Renderer3D {
     }
   }
 
-  // Toggle 360 view mode
-  public set360View(enabled: boolean, robotId?: string): void {
-    this.use360View = enabled;
+  public setRobotCameraMode(mode: RobotCameraMode, robotId?: string): void {
+    this.robotCameraMode = mode;
     this.followRobotId = robotId || null;
-    
-    if (enabled) {
-      // Setup 360 view
+
+    if (mode === 'conical_360') {
       if (!this.composer) {
         this.setup360View();
       }
-      // Disable orbit controls
       if (this.controls) {
         this.controls.enabled = false;
       }
-      // Position camera inside robot, looking upward
-      this.camera.rotation.set(-Math.PI / 2, 0, 0); // Look straight up
-      // Set very wide FOV (near 180 degrees) to capture hemisphere for conical mirror
-      // Use maximum FOV to capture full 360-degree view through conical mirror
-      this.camera.fov = 180; // Maximum FOV to capture full hemisphere/360 view
+      this.camera.rotation.set(-Math.PI / 2, 0, 0);
+      this.camera.fov = 180;
       this.camera.updateProjectionMatrix();
-    } else {
-      // Restore normal view
-      if (this.controls) {
-        this.controls.enabled = true;
-      }
-      this.camera.position.set(
-        CAMERA.INITIAL_POSITION.x,
-        CAMERA.INITIAL_POSITION.y,
-        CAMERA.INITIAL_POSITION.z
-      );
-      this.camera.rotation.set(0, 0, 0);
-      this.camera.fov = CAMERA.FOV;
-      this.camera.updateProjectionMatrix();
+      return;
     }
+
+    if (mode === 'front_pixy2') {
+      if (this.controls) {
+        this.controls.enabled = false;
+      }
+      this.camera.fov = 60;
+      this.camera.updateProjectionMatrix();
+      return;
+    }
+
+    if (this.controls) {
+      this.controls.enabled = true;
+    }
+    this.camera.position.set(
+      CAMERA.INITIAL_POSITION.x,
+      CAMERA.INITIAL_POSITION.y,
+      CAMERA.INITIAL_POSITION.z
+    );
+    this.camera.rotation.set(0, 0, 0);
+    this.camera.fov = CAMERA.FOV;
+    this.camera.updateProjectionMatrix();
+  }
+
+  // Backward-compatible wrapper
+  public set360View(enabled: boolean, robotId?: string): void {
+    this.setRobotCameraMode(enabled ? 'conical_360' : 'none', robotId);
   }
 
   private setupLights(): void {
@@ -606,8 +616,8 @@ export class Renderer3D {
   }
 
   render(state: SimulationState): void {
-    // Update camera position if following a robot in 360 view
-    if (this.use360View && this.followRobotId) {
+    // Update camera position if following a robot in robot camera mode
+    if (this.robotCameraMode !== 'none' && this.followRobotId) {
       const robotState = state.robots.find(r => r.id === this.followRobotId);
       if (robotState && !robotState.penalized) {
         // Physical setup: Pixy2.1 camera at 15cm height, mirror apex 4cm above (19cm total)
@@ -619,14 +629,14 @@ export class Renderer3D {
         };
         
         this.camera.position.set(cameraPos.x, cameraPos.y, cameraPos.z);
-        // Camera always looks straight up (conical mirror is above)
-        this.camera.rotation.set(-Math.PI / 2, 0, 0);
-        
-        // Update cube camera to capture 360-degree view around robot
-        if (this.cubeCamera) {
-          this.cubeCamera.position.set(cameraPos.x, cameraPos.y, cameraPos.z);
-          // Update cube camera to capture current scene from all directions
-          this.cubeCamera.update(this.renderer, this.scene);
+        if (this.robotCameraMode === 'conical_360') {
+          // Camera always looks straight up (conical mirror is above)
+          this.camera.rotation.set(-Math.PI / 2, 0, 0);
+        } else if (this.robotCameraMode === 'front_pixy2') {
+          const lookDistance = 100;
+          const lookX = cameraPos.x + Math.cos(robotState.angle) * lookDistance;
+          const lookZ = cameraPos.z + Math.sin(robotState.angle) * lookDistance;
+          this.camera.lookAt(lookX, cameraPos.y, lookZ);
         }
       }
     }
@@ -667,12 +677,12 @@ export class Renderer3D {
     }
 
     // Update controls (if not in 360 view)
-    if (!this.use360View && this.controls) {
+    if (this.robotCameraMode === 'none' && this.controls) {
       this.controls.update();
     }
 
     // Render with post-processing for 360 view, or normal render
-    if (this.use360View && this.composer && this.cubeCamera && this.cubeRenderTarget && this.quadMesh) {
+    if (this.robotCameraMode === 'conical_360' && this.composer && this.cubeCamera && this.cubeRenderTarget && this.quadMesh) {
       // Update cube camera first to capture 360-degree view around robot
       if (this.followRobotId) {
         const robotState = state.robots.find(r => r.id === this.followRobotId);
@@ -819,4 +829,3 @@ export class Renderer3D {
     }
   }
 }
-

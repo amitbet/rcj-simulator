@@ -188,6 +188,9 @@ export type GameEvent =
 // View mode
 export type ViewMode = '2d' | '3d';
 
+// Perception mode for strategy inputs and robot camera processing
+export type PerceptionMode = 'physics' | 'camera_conical_360' | 'camera_front_pixy2';
+
 // Default observation
 export function createDefaultObservation(): Observation {
   return {
@@ -238,4 +241,3 @@ export function createDefaultAction(): Action {
     kick: false,
   };
 }
-

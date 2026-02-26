@@ -109,6 +109,7 @@ Available in strategy code:
 - **Play/Pause**: Start or pause simulation
 - **Reset**: Reset to kickoff positions
 - **Speed**: Adjust simulation speed (0.25x - 4x)
+- **Perception Mode**: Cycle `Physics` -> `Camera 360 (conical mirror)` -> `Camera Front (Pixy2)` (saved in browser storage)
 - **View Toggle**: Switch between 2D and 3D views
 - **Drag & Drop**: When paused, drag robots and ball to reposition
 

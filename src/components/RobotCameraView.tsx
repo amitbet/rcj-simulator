@@ -4,13 +4,14 @@
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { Renderer3D } from '../renderer/Renderer3D';
-import { SimulationState, WorldState } from '../types';
+import { SimulationState, WorldState, PerceptionMode } from '../types';
 import { SimulationEngine } from '../simulator/SimulationEngine';
 
 interface RobotCameraViewProps {
   simulationState: SimulationState | null;
   simulationEngine?: SimulationEngine | null;
   robotId: string; // Fixed robot ID for this camera view
+  perceptionMode: PerceptionMode;
 }
 
 interface DetectedObject {
@@ -24,10 +25,20 @@ interface DetectedObject {
   angle_deg: number; // Angle in degrees relative to robot forward
 }
 
-export const RobotCameraView: React.FC<RobotCameraViewProps> = ({ simulationState, simulationEngine, robotId }) => {
+type RobotCameraRenderMode = 'conical_360' | 'front_pixy2';
+
+const FRONT_CAMERA_FOV_DEG = 60;
+
+export const RobotCameraView: React.FC<RobotCameraViewProps> = ({
+  simulationState,
+  simulationEngine,
+  robotId,
+  perceptionMode,
+}) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rendererRef = useRef<Renderer3D | null>(null);
+  const lastCameraRenderModeRef = useRef<RobotCameraRenderMode>('conical_360');
   const [worldState, setWorldState] = useState<WorldState | null>(null);
   const [debugMode, setDebugMode] = useState<number>(0); // Track current debug mode
   const [detectedObjects, setDetectedObjects] = useState<DetectedObject[]>([]);
@@ -37,15 +48,27 @@ export const RobotCameraView: React.FC<RobotCameraViewProps> = ({ simulationStat
   // Get robot info
   const robot = simulationState?.robots.find(r => r.id === robotId);
 
+  const getActiveRenderMode = useCallback((): RobotCameraRenderMode => {
+    if (perceptionMode === 'camera_conical_360') {
+      lastCameraRenderModeRef.current = 'conical_360';
+      return 'conical_360';
+    }
+    if (perceptionMode === 'camera_front_pixy2') {
+      lastCameraRenderModeRef.current = 'front_pixy2';
+      return 'front_pixy2';
+    }
+    return lastCameraRenderModeRef.current;
+  }, [perceptionMode]);
+
   // Initialize renderer
   useEffect(() => {
     if (!containerRef.current || rendererRef.current) return;
 
     rendererRef.current = new Renderer3D(containerRef.current);
     
-    // Enable 360 view for this robot
+    // Default robot camera mode for this panel
     if (robotId) {
-      rendererRef.current.set360View(true, robotId);
+      rendererRef.current.setRobotCameraMode(getActiveRenderMode(), robotId);
     }
 
     // Handle resize
@@ -64,13 +87,13 @@ export const RobotCameraView: React.FC<RobotCameraViewProps> = ({ simulationStat
         rendererRef.current = null;
       }
     };
-  }, []);
+  }, [getActiveRenderMode, robotId]);
 
   // Update camera to follow this robot
   useEffect(() => {
     if (!simulationState || !rendererRef.current || !robotId) return;
-    rendererRef.current.set360View(true, robotId);
-  }, [simulationState, robotId]);
+    rendererRef.current.setRobotCameraMode(getActiveRenderMode(), robotId);
+  }, [simulationState, robotId, getActiveRenderMode]);
 
   // Update world state for this robot
   useEffect(() => {
@@ -176,40 +199,29 @@ export const RobotCameraView: React.FC<RobotCameraViewProps> = ({ simulationStat
       const boxWidth = maxX - minX;
         const boxHeight = maxY - minY;
         
-        // Calculate angle from bounding box position in circular view
-        // CRITICAL: Must accurately map screen position to robot-relative angle
-        // Expected mapping: bottom center = 0° (forward), right center = 90° (right), 
-        //                    top center = 180°/-180° (back), left center = -90° (left)
-        
         // Get object center in pixel coordinates
         const objCenterX_px = minX + boxWidth / 2;
         const objCenterY_px = minY + boxHeight / 2;
-        
-        // Convert to normalized coordinates centered at image center
-        // Canvas: X=0 is left, Y=0 is top
-        const centerX = width / 2;
-        const centerY = height / 2;
-        const dx = objCenterX_px - centerX; // Positive = right
-        const dy = objCenterY_px - centerY; // Positive = down (canvas Y increases downward)
-        
-        // Calculate angle using atan2
-        // Canvas coordinates: X increases right, Y increases down
-        // Calculate theta from canvas position
-        const theta = Math.atan2(dy, dx); // atan2(y, x): right=0°, bottom=90°, left=±180°, top=-90°
-        
-        // Convert to robot-relative angle where:
-        //   Bottom (forward) = 0°, Right = 90°, Top (back) = 180°/-180°, Left = -90°
-        // We need to rotate by -90° and negate: angle = -(theta - π/2) = -theta + π/2
-        // This gives:
-        //   Bottom (θ=90°): angle = -90° + 90° = 0° ✓
-        //   Right (θ=0°): angle = 0° + 90° = 90° ✓
-        //   Left (θ=180°): angle = -180° + 90° = -90° ✓
-        //   Top (θ=-90°): angle = 90° + 90° = 180° ✓
-        let angle_deg = (-theta + Math.PI / 2) * 180 / Math.PI;
-        
-        // Normalize to -180 to 180 range
-        while (angle_deg > 180) angle_deg -= 360;
-        while (angle_deg < -180) angle_deg += 360;
+        const renderMode = getActiveRenderMode();
+        let angle_deg = 0;
+
+        if (renderMode === 'front_pixy2') {
+          // Front Pixy2 camera: map x position to +/- 30 degrees
+          const normalizedX = (objCenterX_px / width) * 2 - 1; // -1 left, +1 right
+          angle_deg = normalizedX * (FRONT_CAMERA_FOV_DEG / 2);
+        } else {
+          // Conical 360 view: circular mapping around robot
+          const centerX = width / 2;
+          const centerY = height / 2;
+          const dx = objCenterX_px - centerX; // Positive = right
+          const dy = objCenterY_px - centerY; // Positive = down
+
+          const theta = Math.atan2(dy, dx);
+          angle_deg = (-theta + Math.PI / 2) * 180 / Math.PI;
+
+          while (angle_deg > 180) angle_deg -= 360;
+          while (angle_deg < -180) angle_deg += 360;
+        }
         
         // Estimate distance based on bounding box size
         // CRITICAL: Larger area percentage = CLOSER = SMALLER distance number
@@ -224,17 +236,17 @@ export const RobotCameraView: React.FC<RobotCameraViewProps> = ({ simulationStat
         if (colorKey === 'ball') {
           // Ball diameter is ~4cm, typical detection range 5-220cm
           // Calibrated so quarter-field distance (~55cm) shows correctly
-          const k = 1.5; // Calibration constant (increased from 0.6)
+          const k = renderMode === 'front_pixy2' ? 1.8 : 1.5;
           estimatedDistance = k / Math.sqrt(normalizedArea + 0.0001);
           estimatedDistance = Math.max(5, Math.min(250, estimatedDistance));
         } else if (colorKey === 'goal_blue') {
           // Blue goal
-          const k = 4.5;
+          const k = renderMode === 'front_pixy2' ? 5.0 : 4.5;
           estimatedDistance = k / Math.sqrt(normalizedArea + 0.0001);
           estimatedDistance = Math.max(10, Math.min(350, estimatedDistance));
         } else {
           // Yellow goal - now same as blue since bbox sizes are equal
-          const k = 4.5; // Same as blue!
+          const k = renderMode === 'front_pixy2' ? 5.0 : 4.5;
           estimatedDistance = k / Math.sqrt(normalizedArea + 0.0001);
           estimatedDistance = Math.max(10, Math.min(350, estimatedDistance));
         }
@@ -281,7 +293,7 @@ export const RobotCameraView: React.FC<RobotCameraViewProps> = ({ simulationStat
         yellowGoalDetected: newDetectedObjects.some(o => o.color === 'goal_yellow'),
       });
     }
-  }, [simulationEngine, robotId]);
+  }, [simulationEngine, robotId, getActiveRenderMode]);
 
   // Render loop with throttled color detection
   useEffect(() => {

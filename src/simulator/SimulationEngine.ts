@@ -15,6 +15,7 @@ import {
   SimulationState,
   Action,
   WorldState,
+  PerceptionMode,
   createDefaultAction,
 } from '../types';
 import { TIMING, STARTING_POSITIONS, FIELD, ROBOT, GOAL } from '../types/constants';
@@ -67,8 +68,8 @@ export class SimulationEngine {
     goal_yellow?: { distance: number; angle_deg: number };
   }> = new Map(); // robotId -> camera observations
 
-  // Toggle for using camera vs physics data for strategies
-  private useCameraData: boolean = true; // Default to camera data
+  // Perception source for strategy inputs
+  private perceptionMode: PerceptionMode = 'camera_conical_360';
   private cameraStrictMode: boolean = false; // If true, undetected camera objects become invisible
   private strategyTraceEnabled: boolean = false;
   private strategyTraceUrl: string = '';
@@ -454,12 +455,13 @@ export class SimulationEngine {
       };
 
       if (id === robots.keys().next().value) { // Log for first robot only to avoid spam
-        console.log(`[SimEngine] Robot ${id}: useCameraData=${this.useCameraData}`);
+        console.log(`[SimEngine] Robot ${id}: perceptionMode=${this.perceptionMode}`);
         console.log(`[SimEngine] Physics ball: visible=${worldState.ball.visible}, distance=${worldState.ball.distance.toFixed(1)}, angle=${worldState.ball.angle_deg.toFixed(1)}`);
       }
       
       // Conditionally override with camera-based observations or use physics data
-      if (this.useCameraData) {
+      const useCameraData = this.perceptionMode !== 'physics';
+      if (useCameraData) {
         // Use camera-based observations (strategies use camera calculations)
         // Camera observations map only contains detected objects (undetected objects are not in the map)
         const cameraObs = this.cameraObservations.get(id);
@@ -541,13 +543,13 @@ export class SimulationEngine {
           }
         }
       } else {
-        // useCameraData is false - use physics-based observations directly
+        // physics mode selected - use physics-based observations directly
         // worldState already contains physics observations from ObservationSystem
         if (id === robots.keys().next().value) {
           console.log(`[SimEngine] Using physics data - ball visible=${worldState.ball.visible}`);
         }
       }
-      // If useCameraData is false, use physics-based observations (worldState from ObservationSystem)
+      // If using physics mode, worldState remains from ObservationSystem
       (worldState as any).vision_source = visionSource;
 
       // Line crossing penalties disabled - robots can move freely
@@ -607,7 +609,7 @@ export class SimulationEngine {
     this.strategyTraceBuffer.push({
       t_ms: worldState.t_ms,
       robot_id: robotId,
-      use_camera_data: this.useCameraData,
+      perception_mode: this.perceptionMode,
       state: state ?? null,
       target: target ?? null,
       heading_deg: worldState.heading_deg,
@@ -1081,9 +1083,9 @@ export class SimulationEngine {
         goal_yellow: { ...worldState.goal_yellow }
       };
       
-      // Override with camera-based observations if available
+      // Override with camera-based observations when camera mode is active
       const cameraObs = this.cameraObservations.get(id);
-      if (cameraObs) {
+      if (this.perceptionMode !== 'physics' && cameraObs) {
         if (cameraObs.ball && worldState.ball.visible) {
           worldState.ball.distance = cameraObs.ball.distance;
           worldState.ball.angle_deg = cameraObs.ball.angle_deg;
@@ -1103,9 +1105,9 @@ export class SimulationEngine {
       
       // Track which observations came from camera (for display)
       (worldState as any).camera_detected = {
-        ball: !!cameraObs?.ball,
-        goal_blue: !!cameraObs?.goal_blue,
-        goal_yellow: !!cameraObs?.goal_yellow
+        ball: this.perceptionMode !== 'physics' && !!cameraObs?.ball,
+        goal_blue: this.perceptionMode !== 'physics' && !!cameraObs?.goal_blue,
+        goal_yellow: this.perceptionMode !== 'physics' && !!cameraObs?.goal_yellow
       };
       
       // Include stored robot state and target if available
@@ -1172,14 +1174,14 @@ export class SimulationEngine {
     return this.physics;
   }
 
-  // Toggle between camera and physics data for strategies
-  setUseCameraData(useCamera: boolean): void {
-    this.useCameraData = useCamera;
+  // Set perception mode for strategy inputs
+  setPerceptionMode(mode: PerceptionMode): void {
+    this.perceptionMode = mode;
   }
 
-  // Get current data source setting
-  getUseCameraData(): boolean {
-    return this.useCameraData;
+  // Get current perception mode
+  getPerceptionMode(): PerceptionMode {
+    return this.perceptionMode;
   }
 
   // Dispose

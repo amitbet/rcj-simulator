@@ -3,30 +3,51 @@
 // ============================================================
 
 import React from 'react';
+import { PerceptionMode } from '../types';
 
 interface ControlPanelProps {
   isPaused: boolean;
   speed: number;
-  useCameraData: boolean;
+  perceptionMode: PerceptionMode;
   onPlayPause: () => void;
   onReset: () => void;
   onResetMatch: () => void;
   onSpeedChange: (speed: number) => void;
-  onToggleDataSource: () => void;
+  onCyclePerceptionMode: () => void;
   onNewGame: () => void;
 }
 
 export const ControlPanel: React.FC<ControlPanelProps> = ({
   isPaused,
   speed,
-  useCameraData,
+  perceptionMode,
   onPlayPause,
   onReset,
   onResetMatch,
   onSpeedChange,
-  onToggleDataSource,
+  onCyclePerceptionMode,
   onNewGame,
 }) => {
+  const modeInfo: Record<PerceptionMode, { icon: string; title: string; isPrimary: boolean }> = {
+    physics: {
+      icon: '⚙️',
+      title: 'Perception: Physics (click to switch to Camera 360)',
+      isPrimary: true,
+    },
+    camera_conical_360: {
+      icon: '📷360',
+      title: 'Perception: Camera 360 Conical Mirror (click to switch to Front Pixy2)',
+      isPrimary: false,
+    },
+    camera_front_pixy2: {
+      icon: '📷F',
+      title: 'Perception: Front-Facing Pixy2 Camera (click to switch to Physics)',
+      isPrimary: false,
+    },
+  };
+
+  const currentMode = modeInfo[perceptionMode];
+
   return (
     <div className="panel-section control-panel">
       <h3 className="panel-section-title">Controls</h3>
@@ -63,12 +84,12 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
 
       <div style={{ marginTop: '16px', display: 'flex', gap: '8px', justifyContent: 'center' }}>
         <button
-          className={`btn btn-icon ${useCameraData ? 'btn-secondary' : 'btn-primary'}`}
-          onClick={onToggleDataSource}
-          title={useCameraData ? 'Switch to physics data' : 'Switch to camera data'}
+          className={`btn btn-icon ${currentMode.isPrimary ? 'btn-primary' : 'btn-secondary'}`}
+          onClick={onCyclePerceptionMode}
+          title={currentMode.title}
           style={{ fontSize: '1.5rem' }}
         >
-          {useCameraData ? '📷' : '⚙️'}
+          {currentMode.icon}
         </button>
         <button
           className="btn btn-secondary btn-icon"
@@ -90,4 +111,3 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
     </div>
   );
 };
-

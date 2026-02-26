@@ -6,7 +6,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { SimulationEngine, SimulationConfig } from './simulator/SimulationEngine';
 import { Renderer2D } from './renderer/Renderer2D';
 import { Renderer3D } from './renderer/Renderer3D';
-import { GameMode, SimulationState, ViewMode, GamePhase } from './types';
+import { GameMode, SimulationState, ViewMode, GamePhase, PerceptionMode } from './types';
 import { GameModeSelector } from './components/GameModeSelector';
 import { ControlPanel } from './components/ControlPanel';
 import { ScoreBoard } from './components/ScoreBoard';
@@ -29,6 +29,23 @@ const getCurrentStrategyContent = () => ({
   yellow_defender: defenderStrategyRaw,
 });
 
+const PERCEPTION_MODE_STORAGE_KEY = 'rcj.perceptionMode';
+
+const getInitialPerceptionMode = (): PerceptionMode => {
+  const stored = window.localStorage.getItem(PERCEPTION_MODE_STORAGE_KEY);
+  if (
+    stored === 'physics' ||
+    stored === 'camera_conical_360' ||
+    stored === 'camera_front_pixy2'
+  ) {
+    return stored;
+  }
+
+  const envCameraDefault = (import.meta as any).env?.VITE_USE_CAMERA_DATA;
+  const useCameraByDefault = !(envCameraDefault === '0' || envCameraDefault === 'false');
+  return useCameraByDefault ? 'camera_conical_360' : 'physics';
+};
+
 const App: React.FC = () => {
   // State
   const [showModeSelector, setShowModeSelector] = useState(true);
@@ -39,9 +56,7 @@ const App: React.FC = () => {
   const [isDragging, setIsDragging] = useState(false);
   const [dragTarget, setDragTarget] = useState<{ type: 'ball' | 'robot'; id?: string } | null>(null);
   const [use360View, setUse360View] = useState(false);
-  const envCameraDefault = (import.meta as any).env?.VITE_USE_CAMERA_DATA;
-  const initialUseCameraData = !(envCameraDefault === '0' || envCameraDefault === 'false');
-  const [useCameraData, setUseCameraData] = useState(initialUseCameraData);
+  const [perceptionMode, setPerceptionMode] = useState<PerceptionMode>(getInitialPerceptionMode);
 
   // Strategies state with hashes for change detection
   const [strategies, setStrategies] = useState<Record<string, { code: string; hash: string; loadTime: number }>>({});
@@ -211,7 +226,7 @@ const App: React.FC = () => {
 
     simulation.initialize(config);
     // Set initial data source preference
-    simulation.setUseCameraData(useCameraData);
+    simulation.setPerceptionMode(perceptionMode);
     simulation.setOnStateUpdate((state) => {
       setSimulationState(state);
       // Update world states
@@ -226,14 +241,15 @@ const App: React.FC = () => {
     const initialState = simulation.getSimulationState();
     setSimulationState(initialState);
     setWorldStates(simulation.getWorldStates());
-  }, [strategies]);
+  }, [strategies, perceptionMode]);
 
-  // Sync useCameraData with simulation when it changes
+  // Sync perception mode with simulation when it changes
   useEffect(() => {
+    window.localStorage.setItem(PERCEPTION_MODE_STORAGE_KEY, perceptionMode);
     if (simulationRef.current) {
-      simulationRef.current.setUseCameraData(useCameraData);
+      simulationRef.current.setPerceptionMode(perceptionMode);
     }
-  }, [useCameraData]);
+  }, [perceptionMode]);
 
   // Handle mode selection - auto-start the simulation
   const handleModeSelect = (mode: GameMode) => {
@@ -353,11 +369,13 @@ const App: React.FC = () => {
     window.location.reload();
   };
 
-  const handleToggleDataSource = () => {
-    const newValue = !useCameraData;
-    setUseCameraData(newValue);
+  const handleCyclePerceptionMode = () => {
+    const modeOrder: PerceptionMode[] = ['physics', 'camera_conical_360', 'camera_front_pixy2'];
+    const currentIndex = modeOrder.indexOf(perceptionMode);
+    const nextMode = modeOrder[(currentIndex + 1) % modeOrder.length];
+    setPerceptionMode(nextMode);
     if (simulationRef.current) {
-      simulationRef.current.setUseCameraData(newValue);
+      simulationRef.current.setPerceptionMode(nextMode);
     }
   };
 
@@ -467,6 +485,7 @@ const App: React.FC = () => {
                 simulationState={simulationState} 
                 simulationEngine={simulationRef.current}
                 robotId={robot.id}
+                perceptionMode={perceptionMode}
               />
             </div>
           ))}
@@ -574,12 +593,12 @@ const App: React.FC = () => {
               <ControlPanel
                 isPaused={isPaused}
                 speed={speed}
-                useCameraData={useCameraData}
+                perceptionMode={perceptionMode}
                 onPlayPause={handlePlayPause}
                 onReset={handleReset}
                 onResetMatch={handleResetMatch}
                 onSpeedChange={handleSpeedChange}
-                onToggleDataSource={handleToggleDataSource}
+                onCyclePerceptionMode={handleCyclePerceptionMode}
                 onNewGame={handleNewGame}
               />
 
