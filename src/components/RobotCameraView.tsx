@@ -87,7 +87,7 @@ export const RobotCameraView: React.FC<RobotCameraViewProps> = ({
         rendererRef.current = null;
       }
     };
-  }, [getActiveRenderMode, robotId]);
+  }, []);
 
   // Update camera to follow this robot
   useEffect(() => {
